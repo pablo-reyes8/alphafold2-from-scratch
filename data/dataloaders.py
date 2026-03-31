@@ -11,6 +11,7 @@ from Bio.SeqUtils import seq1
 from difflib import SequenceMatcher
 from Bio import Align
 
+
 AA_VOCAB = {
     "-": 0,
     "A": 1, "R": 2, "N": 3, "D": 4, "C": 5,
@@ -18,7 +19,8 @@ AA_VOCAB = {
     "L": 11, "K": 12, "M": 13, "F": 14, "P": 15,
     "S": 16, "T": 17, "W": 18, "Y": 19, "V": 20,
     "X": 21, "B": 22, "Z": 23, "U": 24, "O": 25,
-    ".": 26}
+    ".": 26
+}
 
 UNK_TOKEN = AA_VOCAB["X"]
 
@@ -100,12 +102,6 @@ def extract_chain_sequences_and_backbone(cif_path: Path) -> Dict[str, Dict]:
         "coords_ca": np.ndarray [L, 3],
         "coords_c":  np.ndarray [L, 3],
     }
-
-    Notes
-    -----
-    - One row per polymer residue.
-    - Missing atoms are filled with NaN.
-    - Hetero residues are skipped.
     """
     parser = MMCIFParser(QUIET=True)
     structure = parser.get_structure(cif_path.stem, str(cif_path))
@@ -149,10 +145,10 @@ def extract_chain_sequences_and_backbone(cif_path: Path) -> Dict[str, Dict]:
             "sequence": "".join(seq_chars),
             "coords_n": np.array(coords_n, dtype=np.float32),
             "coords_ca": np.array(coords_ca, dtype=np.float32),
-            "coords_c": np.array(coords_c, dtype=np.float32)}
+            "coords_c": np.array(coords_c, dtype=np.float32),
+        }
 
     return out
-
 
 
 def sequence_identity(a: str, b: str) -> float:
@@ -162,10 +158,10 @@ def sequence_identity(a: str, b: str) -> float:
 def match_target_to_chain(
     target_seq: str,
     chain_data: Dict[str, Dict],
-    min_identity: float = 0.85, ) -> Optional[Tuple[str, float]]:
-
+    min_identity: float = 0.85,
+) -> Optional[Tuple[str, float]]:
     aligner = Align.PairwiseAligner()
-    aligner.mode = 'local' # Fundamental para ignorar los gaps por missing data
+    aligner.mode = "local"
 
     best_chain = None
     best_score = -1.0
@@ -176,8 +172,6 @@ def match_target_to_chain(
             continue
 
         score = aligner.score(target_seq, chain_seq)
-
-        # Normalizamos por la longitud de la secuencia que encontramos en el CIF
         coverage = score / len(chain_seq)
 
         if coverage > best_score:
@@ -192,7 +186,102 @@ def match_target_to_chain(
 
 def pairwise_distances(coords: torch.Tensor) -> torch.Tensor:
     diff = coords[:, None, :] - coords[None, :, :]
-    return torch.sqrt(torch.sum(diff**2, dim=-1) + 1e-8)
+    return torch.sqrt(torch.sum(diff ** 2, dim=-1) + 1e-8)
+
+
+def dihedral_angle(p0, p1, p2, p3, eps=1e-8):
+    """
+    Compute dihedral angle (radians) from 4 points in R^3.
+    """
+    b0 = p1 - p0
+    b1 = p2 - p1
+    b2 = p3 - p2
+
+    b1_norm = np.linalg.norm(b1)
+    if b1_norm < eps:
+        return np.nan
+    b1u = b1 / b1_norm
+
+    v = b0 - np.dot(b0, b1u) * b1u
+    w = b2 - np.dot(b2, b1u) * b1u
+
+    v_norm = np.linalg.norm(v)
+    w_norm = np.linalg.norm(w)
+    if v_norm < eps or w_norm < eps:
+        return np.nan
+
+    x = np.dot(v, w)
+    y = np.dot(np.cross(b1u, v), w)
+
+    return np.arctan2(y, x)
+
+
+def backbone_torsions_from_coords(coords_n, coords_ca, coords_c, valid_backbone_mask, eps=1e-8):
+    """
+    Compute phi, psi, omega from backbone coordinates.
+
+    Returns
+    -------
+    torsion_true : torch.Tensor [L, 3, 2]
+        order = [phi, psi, omega], encoded as (sin, cos)
+    torsion_mask : torch.Tensor [L, 3]
+    """
+    L = coords_n.shape[0]
+
+    torsion_true = np.zeros((L, 3, 2), dtype=np.float32)
+    torsion_mask = np.zeros((L, 3), dtype=np.float32)
+
+    # phi_i   = dihedral(C_{i-1}, N_i,  CA_i, C_i)
+    # psi_i   = dihedral(N_i,     CA_i, C_i,  N_{i+1})
+    # omega_i = dihedral(CA_i,    C_i,  N_{i+1}, CA_{i+1})
+
+    for i in range(L):
+        # phi
+        if i > 0 and valid_backbone_mask[i - 1] and valid_backbone_mask[i]:
+            ang = dihedral_angle(
+                coords_c[i - 1],
+                coords_n[i],
+                coords_ca[i],
+                coords_c[i],
+                eps=eps,
+            )
+            if np.isfinite(ang):
+                torsion_true[i, 0, 0] = np.sin(ang)
+                torsion_true[i, 0, 1] = np.cos(ang)
+                torsion_mask[i, 0] = 1.0
+
+        # psi
+        if i < L - 1 and valid_backbone_mask[i] and valid_backbone_mask[i + 1]:
+            ang = dihedral_angle(
+                coords_n[i],
+                coords_ca[i],
+                coords_c[i],
+                coords_n[i + 1],
+                eps=eps,
+            )
+            if np.isfinite(ang):
+                torsion_true[i, 1, 0] = np.sin(ang)
+                torsion_true[i, 1, 1] = np.cos(ang)
+                torsion_mask[i, 1] = 1.0
+
+        # omega
+        if i < L - 1 and valid_backbone_mask[i] and valid_backbone_mask[i + 1]:
+            ang = dihedral_angle(
+                coords_ca[i],
+                coords_c[i],
+                coords_n[i + 1],
+                coords_ca[i + 1],
+                eps=eps,
+            )
+            if np.isfinite(ang):
+                torsion_true[i, 2, 0] = np.sin(ang)
+                torsion_true[i, 2, 1] = np.cos(ang)
+                torsion_mask[i, 2] = 1.0
+
+    return (
+        torch.tensor(torsion_true, dtype=torch.float32),
+        torch.tensor(torsion_mask, dtype=torch.float32),
+    )
 
 
 class FoldbenchProteinDataset(Dataset):
@@ -306,52 +395,60 @@ class FoldbenchProteinDataset(Dataset):
         msa_seqs = pad_or_crop_msa(
             msa_seqs,
             target_len=len(target_sequence),
-            max_msa_seqs=self.max_msa_seqs
+            max_msa_seqs=self.max_msa_seqs,
         )
         msa_tokens = tokenize_msa(msa_seqs)
         msa_mask = (msa_tokens != AA_VOCAB["-"]).float()
 
         chain_data = extract_chain_sequences_and_backbone(cif_file)
 
-        coords_n_np  = chain_data[matched_chain_id]["coords_n"]
+        coords_n_np = chain_data[matched_chain_id]["coords_n"]
         coords_ca_np = chain_data[matched_chain_id]["coords_ca"]
-        coords_c_np  = chain_data[matched_chain_id]["coords_c"]
+        coords_c_np = chain_data[matched_chain_id]["coords_c"]
 
-        # máscaras antes de reemplazar NaNs
-        valid_n  = ~np.isnan(coords_n_np).any(axis=1)
+        valid_n = ~np.isnan(coords_n_np).any(axis=1)
         valid_ca = ~np.isnan(coords_ca_np).any(axis=1)
-        valid_c  = ~np.isnan(coords_c_np).any(axis=1)
+        valid_c = ~np.isnan(coords_c_np).any(axis=1)
 
-        valid_res_mask = torch.tensor(valid_ca, dtype=torch.float32)
-        valid_backbone_mask = torch.tensor(valid_n & valid_ca & valid_c, dtype=torch.float32)
+        valid_res_mask_np = valid_ca.astype(np.float32)
+        valid_backbone_mask_np = (valid_n & valid_ca & valid_c).astype(np.float32)
 
-        # reemplazar NaNs por 0 para evitar NaNs en PyTorch
-        coords_n_np  = np.nan_to_num(coords_n_np, nan=0.0)
+        coords_n_np = np.nan_to_num(coords_n_np, nan=0.0)
         coords_ca_np = np.nan_to_num(coords_ca_np, nan=0.0)
-        coords_c_np  = np.nan_to_num(coords_c_np, nan=0.0)
-
-        coords_n  = torch.tensor(coords_n_np, dtype=torch.float32)
-        coords_ca = torch.tensor(coords_ca_np, dtype=torch.float32)
-        coords_c  = torch.tensor(coords_c_np, dtype=torch.float32)
+        coords_c_np = np.nan_to_num(coords_c_np, nan=0.0)
 
         L = min(
             len(seq_tokens),
-            coords_ca.shape[0],
-            coords_n.shape[0],
-            coords_c.shape[0],
-            msa_tokens.shape[1]
+            coords_ca_np.shape[0],
+            coords_n_np.shape[0],
+            coords_c_np.shape[0],
+            msa_tokens.shape[1],
         )
 
         seq_tokens = seq_tokens[:L]
         msa_tokens = msa_tokens[:, :L]
         msa_mask = msa_mask[:, :L]
 
-        coords_n = coords_n[:L]
-        coords_ca = coords_ca[:L]
-        coords_c = coords_c[:L]
+        coords_n_np = coords_n_np[:L]
+        coords_ca_np = coords_ca_np[:L]
+        coords_c_np = coords_c_np[:L]
 
-        valid_res_mask = valid_res_mask[:L]
-        valid_backbone_mask = valid_backbone_mask[:L]
+        valid_res_mask_np = valid_res_mask_np[:L]
+        valid_backbone_mask_np = valid_backbone_mask_np[:L]
+
+        torsion_true, torsion_mask = backbone_torsions_from_coords(
+            coords_n=coords_n_np,
+            coords_ca=coords_ca_np,
+            coords_c=coords_c_np,
+            valid_backbone_mask=valid_backbone_mask_np.astype(bool),
+        )
+
+        coords_n = torch.tensor(coords_n_np, dtype=torch.float32)
+        coords_ca = torch.tensor(coords_ca_np, dtype=torch.float32)
+        coords_c = torch.tensor(coords_c_np, dtype=torch.float32)
+
+        valid_res_mask = torch.tensor(valid_res_mask_np, dtype=torch.float32)
+        valid_backbone_mask = torch.tensor(valid_backbone_mask_np, dtype=torch.float32)
 
         dist_map = pairwise_distances(coords_ca)
 
@@ -364,12 +461,12 @@ class FoldbenchProteinDataset(Dataset):
             "seq_tokens": seq_tokens,
             "msa_tokens": msa_tokens,
             "msa_mask": msa_mask,
-            "coords_n": coords_n,                       # [L,3]
-            "coords_ca": coords_ca,                     # [L,3]
-            "coords_c": coords_c,                       # [L,3]
-            "dist_map": dist_map,                       # [L,L]
+            "coords_n": coords_n,                       # [L, 3]
+            "coords_ca": coords_ca,                     # [L, 3]
+            "coords_c": coords_c,                       # [L, 3]
+            "dist_map": dist_map,                       # [L, L]
             "valid_res_mask": valid_res_mask,           # [L]
             "valid_backbone_mask": valid_backbone_mask, # [L]
+            "torsion_true": torsion_true,               # [L, 3, 2] -> phi, psi, omega as (sin, cos)
+            "torsion_mask": torsion_mask,               # [L, 3]
         }
-    
-

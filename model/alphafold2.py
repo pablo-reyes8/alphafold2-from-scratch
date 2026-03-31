@@ -30,9 +30,12 @@ class AlphaFold2(nn.Module):
         pad_idx=0,
         num_evoformer_blocks=4,
         num_structure_blocks=8,
+        transition_expansion_evoformer = 4, 
+        transition_expansion_structure = 4, 
+        use_block_specific_params = False, 
         dist_bins=64,
         plddt_bins=50,
-        n_torsions=7):
+        n_torsions=7 , num_res_blocks_torsion = 2):
 
         super().__init__()
 
@@ -51,7 +54,7 @@ class AlphaFold2(nn.Module):
         self.evoformer = EvoformerStack(
             num_blocks=num_evoformer_blocks,
             c_m=c_m,
-            c_z=c_z,)
+            c_z=c_z , transition_expansion=transition_expansion_evoformer)
 
         self.single_proj = SingleProjection(c_m=c_m, c_s=c_s)
 
@@ -59,12 +62,12 @@ class AlphaFold2(nn.Module):
         self.structure_module = StructureModule(
             c_s=c_s,
             c_z=c_z,
-            num_blocks=num_structure_blocks)
+            num_blocks=num_structure_blocks , transition_expansion=transition_expansion_structure , use_block_specific_params=use_block_specific_params)
 
         # Cabezas finales para entender el modelo
         self.plddt_head = PlddtHead(c_s=c_s, num_bins=plddt_bins)
         self.distogram_head = DistogramHead(c_z=c_z, num_bins=dist_bins)
-        self.torsion_head = TorsionHead(c_s=c_s, n_torsions=n_torsions)
+        self.torsion_head = TorsionHead(c_s=c_s, n_torsions=n_torsions , num_res_blocks = num_res_blocks_torsion)
 
 
     def forward(

@@ -89,7 +89,10 @@ class AlphaFoldLoss(nn.Module):
         t_pred = out["t"]                                  # [B,L,3]
 
         # PoC: use predicted translation as predicted CA
-        x_pred = t_pred                                    # [B,L,3]
+        if out.get("backbone_coords", None) is not None:
+            x_pred = out["backbone_coords"][:, :, 1, :]
+        else:
+            x_pred = t_pred                                  # [B,L,3]
 
 
         # True structure: canonical backbone frames

@@ -26,6 +26,9 @@ def collate_proteins(batch):
     pair_mask = torch.zeros((B, max_L, max_L), dtype=torch.float32)
     backbone_pair_mask = torch.zeros((B, max_L, max_L), dtype=torch.float32)
 
+    torsion_true = torch.zeros((B, max_L, 3, 2), dtype=torch.float32)
+    torsion_mask = torch.zeros((B, max_L, 3), dtype=torch.float32)
+
     ids = []
     msa_chain_ids = []
     matched_chain_ids = []
@@ -51,15 +54,16 @@ def collate_proteins(batch):
 
         dist_map[i, :L, :L] = item["dist_map"]
 
-        # pair mask basada en residuos con CA válido
         pair_mask[i, :L, :L] = (
             item["valid_res_mask"][:, None] * item["valid_res_mask"][None, :]
         )
 
-        # pair mask basada en residuos con backbone completo (N, CA, C)
         backbone_pair_mask[i, :L, :L] = (
             item["valid_backbone_mask"][:, None] * item["valid_backbone_mask"][None, :]
         )
+
+        torsion_true[i, :L] = item["torsion_true"]
+        torsion_mask[i, :L] = item["torsion_mask"]
 
         ids.append(item["id"])
         msa_chain_ids.append(item["msa_chain_id"])
@@ -85,4 +89,6 @@ def collate_proteins(batch):
         "valid_backbone_mask": valid_backbone_mask,   # [B, L]
         "pair_mask": pair_mask,                       # [B, L, L]
         "backbone_pair_mask": backbone_pair_mask,     # [B, L, L]
+        "torsion_true": torsion_true,                 # [B, L, 3, 2]
+        "torsion_mask": torsion_mask,                 # [B, L, 3]
     }
