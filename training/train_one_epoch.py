@@ -37,6 +37,33 @@ def gpu_mem_mb(device="cuda"):
     return 0.0, 0.0
 
 
+def resolve_batch_num_recycles(
+    *,
+    num_recycles: int = 0,
+    stochastic_recycling: bool = False,
+    max_recycles: int | None = None,
+    device: torch.device | str | None = None,
+) -> int:
+    """
+    Resolve the recycle count to use for a single training batch.
+
+    When stochastic recycling is enabled, the count is sampled uniformly from
+    ``[0, upper]`` inclusive using PyTorch RNG so the result follows the same
+    seeding policy as the rest of training.
+    """
+    num_recycles = max(0, int(num_recycles))
+
+    if not stochastic_recycling:
+        return num_recycles
+
+    upper = num_recycles if max_recycles is None else int(max_recycles)
+    if upper < 0:
+        raise ValueError("max_recycles must be >= 0 when stochastic_recycling=True")
+
+    sample_device = device if device is not None else "cpu"
+    return int(torch.randint(0, upper + 1, (1,), device=sample_device).item())
+
+
 def train_one_epoch(
     model,
     dataloader,
@@ -59,6 +86,9 @@ def train_one_epoch(
     on_oom: str = "skip",
     global_step: int = 0,
     ideal_backbone_local: torch.Tensor | None = None,
+    num_recycles: int = 0,
+    stochastic_recycling: bool = False,
+    max_recycles: int | None = None,
 ):
     """
     Train one epoch for AlphaFold2-like model.
@@ -68,6 +98,10 @@ def train_one_epoch(
     - Losses are accumulated on every batch.
     - Structural metrics (RMSD/TM/GDT) are computed only on logging steps.
     - Scheduler / EMA / global_step advance only if optimizer step actually happened.
+    - ``num_recycles`` controls the fixed number of extra recycling passes.
+    - If ``stochastic_recycling=True``, each batch samples its recycle count
+      uniformly from ``[0, max_recycles]`` inclusive. When ``max_recycles`` is
+      omitted, ``num_recycles`` is used as the upper bound.
     """
 
     model.train()
@@ -84,6 +118,7 @@ def train_one_epoch(
         "dist_loss": 0.0,
         "plddt_loss": 0.0,
         "torsion_loss": 0.0,
+        "num_recycles": 0.0,
         "rmsd_logged": 0.0,
         "tm_score_logged": 0.0,
         "gdt_ts_logged": 0.0,}
@@ -113,6 +148,12 @@ def train_one_epoch(
             batch = move_batch_to_device(batch, device)
             B = batch["seq_tokens"].shape[0]
             n_seen_samples += B
+            batch_num_recycles = resolve_batch_num_recycles(
+                num_recycles=num_recycles,
+                stochastic_recycling=stochastic_recycling,
+                max_recycles=max_recycles,
+                device=batch["seq_tokens"].device,
+            )
 
             # -------------------------
             # Forward
@@ -123,7 +164,8 @@ def train_one_epoch(
                     msa_tokens=batch["msa_tokens"],
                     seq_mask=batch["seq_mask"],
                     msa_mask=batch["msa_mask"],
-                    ideal_backbone_local=ideal_backbone_local,)
+                    ideal_backbone_local=ideal_backbone_local,
+                    num_recycles=batch_num_recycles,)
 
                 loss_dict = criterion(out, batch)
                 loss = loss_dict["loss"] / grad_accum_steps
@@ -189,6 +231,7 @@ def train_one_epoch(
             running["dist_loss"] += float(loss_dict["dist_loss"].detach().item())
             running["plddt_loss"] += float(loss_dict["plddt_loss"].detach().item())
             running["torsion_loss"] += float(loss_dict["torsion_loss"].detach().item())
+            running["num_recycles"] += float(batch_num_recycles)
 
             n_seen_batches += 1
 
@@ -272,6 +315,7 @@ def train_one_epoch(
         "dist_loss": running["dist_loss"] / denom_loss,
         "plddt_loss": running["plddt_loss"] / denom_loss,
         "torsion_loss": running["torsion_loss"] / denom_loss,
+        "num_recycles": running["num_recycles"] / denom_loss,
         # promedios solo sobre los puntos donde sí se loguearon métricas
         "rmsd_logged": running["rmsd_logged"] / denom_metrics if n_metric_logs > 0 else float("nan"),
         "tm_score_logged": running["tm_score_logged"] / denom_metrics if n_metric_logs > 0 else float("nan"),

@@ -63,6 +63,34 @@ def test_alphafold_loss_orchestrator_returns_finite_components(toy_model, toy_ba
     assert torch.allclose(losses["loss"], expected, atol=1e-5)
 
 
+def test_alphafold2_recycling_changes_final_representations(toy_model, toy_batch):
+    with torch.no_grad():
+        baseline = toy_model(
+            seq_tokens=toy_batch["seq_tokens"],
+            msa_tokens=toy_batch["msa_tokens"],
+            seq_mask=toy_batch["seq_mask"],
+            msa_mask=toy_batch["msa_mask"],
+            ideal_backbone_local=toy_batch["ideal_backbone_local"],
+            num_recycles=0,
+        )
+        recycled = toy_model(
+            seq_tokens=toy_batch["seq_tokens"],
+            msa_tokens=toy_batch["msa_tokens"],
+            seq_mask=toy_batch["seq_mask"],
+            msa_mask=toy_batch["msa_mask"],
+            ideal_backbone_local=toy_batch["ideal_backbone_local"],
+            num_recycles=2,
+        )
+
+    assert recycled["z"].shape == baseline["z"].shape
+    assert recycled["t"].shape == baseline["t"].shape
+    assert recycled["backbone_coords"].shape == baseline["backbone_coords"].shape
+    assert torch.isfinite(recycled["z"]).all()
+    assert torch.isfinite(recycled["distogram_logits"]).all()
+    assert not torch.allclose(recycled["z"], baseline["z"])
+    assert not torch.allclose(recycled["distogram_logits"], baseline["distogram_logits"])
+
+
 def test_alphafold_loss_uses_backbone_coords_when_available(toy_batch, toy_criterion):
     batch_size, length = toy_batch["seq_tokens"].shape
 

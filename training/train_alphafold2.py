@@ -37,6 +37,9 @@ def train_alphafold2(
     max_batches: int | None = None,
     on_oom: str = "skip",
     ideal_backbone_local: torch.Tensor | None = None,
+    num_recycles: int = 0,
+    stochastic_recycling: bool = False,
+    max_recycles: int | None = None,
 
     # checkpoint / monitoring
     ckpt_dir: str = "checkpoints",
@@ -65,6 +68,12 @@ def train_alphafold2(
     are already created externally.
     """
     os.makedirs(ckpt_dir, exist_ok=True)
+    recycle_upper = num_recycles if max_recycles is None else int(max_recycles)
+    recycle_mode = (
+        f"uniform[0,{recycle_upper}]"
+        if stochastic_recycling
+        else f"fixed={num_recycles}"
+    )
 
     # Optional resume
     if resume_path is not None and os.path.exists(resume_path):
@@ -118,7 +127,8 @@ def train_alphafold2(
     print(f"AlphaFold2-like run: {run_name}")
     print(
         f"Device: {device} | AMP: {amp_enabled}({amp_dtype}) | EMA: {ema_str} | "
-        f"epochs: {epochs} | lr_now: {lr_now:.2e} | grad_clip: {grad_clip}")
+        f"epochs: {epochs} | lr_now: {lr_now:.2e} | grad_clip: {grad_clip} | "
+        f"recycles: {recycle_mode}")
     print(
         f"Monitor: {monitor_name} ({monitor_mode}) | "
         f"start_epoch: {start_epoch} | global_step: {global_step}")
@@ -157,7 +167,10 @@ def train_alphafold2(
             log_mem=log_mem,
             on_oom=on_oom,
             global_step=global_step,
-            ideal_backbone_local=ideal_backbone_local)
+            ideal_backbone_local=ideal_backbone_local,
+            num_recycles=num_recycles,
+            stochastic_recycling=stochastic_recycling,
+            max_recycles=max_recycles)
 
         sec = time.time() - t0
         total_time += sec
