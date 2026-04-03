@@ -189,8 +189,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # You need to download first the data
 dataset = FoldbenchProteinDataset(
     manifest_csv="data/showcase_manifest.csv",
-    max_msa_seqs=128,
-)
+    max_msa_seqs=128,)
+
 loader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_proteins)
 
 model = AlphaFold2(
@@ -201,8 +201,7 @@ model = AlphaFold2(
     c_s=256,
     num_evoformer_blocks=2,
     num_structure_blocks=4,
-    n_torsions=3,
-).to(device)
+    n_torsions=3).to(device)
 
 criterion = AlphaFoldLoss()
 total_steps = 20 * len(loader)
@@ -211,8 +210,8 @@ optimizer, scheduler = build_optimizer_and_scheduler(
     lr=1e-4,
     weight_decay=1e-4,
     total_steps=total_steps,
-    warmup_steps=max(10, int(0.05 * total_steps)),
-)
+    warmup_steps=max(10, int(0.05 * total_steps)))
+
 ema = EMA(model, decay=0.999, device="cpu", use_num_updates=True)
 amp_cfg = build_amp_config(device=device, amp_enabled=True, amp_dtype="bf16")
 
@@ -220,8 +219,7 @@ ideal_backbone_local = torch.tensor([
     [-1.458, 0.000, 0.000],
     [0.000, 0.000, 0.000],
     [0.547, 1.426, 0.000],
-    [0.224, 2.617, 0.000],
-], dtype=torch.float32, device=device)
+    [0.224, 2.617, 0.000]], dtype=torch.float32, device=device)
 
 result = train_alphafold2(
     model=model,
@@ -237,8 +235,8 @@ result = train_alphafold2(
     amp_dtype=amp_cfg["amp_dtype_requested"],
     ideal_backbone_local=ideal_backbone_local,
     ckpt_dir="checkpoints_af2",
-    run_name="af2_poc",
-)
+    run_name="af2_poc")
+    
 ```
 
 ### CLI training
