@@ -27,7 +27,7 @@ While the original DeepMind release and frameworks like OpenFold are designed fo
 
 It is also designed with accessibility in mind for people who do not have access to large training clusters. For that reason, we include [Alpha_Fold_English.ipynb](notebooks/Alpha_Fold_English.ipynb) and [Alpha_Fold_Spanish.ipynb](notebooks/Alpha_Fold_Spanish.ipynb), a complete notebook that makes it easier to explore the project end-to-end from environments such as **Google Colab** or **Kaggle**, without needing a heavy local setup.
 
-More broadly, the goal is to make this architecture genuinely accessible to study: anyone should be able to inspect, modify, and run meaningful experiments with the model, adapting its scale to the hardware they actually have rather than being excluded by the need for large training infrastructure.
+More broadly, the goal is to make this architecture genuinely accessible as an object of serious study rather than a black box reserved for large-scale infrastructure. To that end, we designed a structured ablation suite ([Ablations Suite](#ablations-suite)) so researchers and students can systematically probe, stress-test, and reinterpret the behavior of a model that is otherwise exceptionally complex and abstract. The idea is not only to run AlphaFold2 components at a scale compatible with the hardware people actually have, but to make it easy to manipulate the architecture, isolate its mechanisms, and turn experimentation itself into a practical route toward understanding.
 
 ## Index
 
