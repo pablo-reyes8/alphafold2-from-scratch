@@ -26,7 +26,7 @@ This repository provides a **from-scratch, modular PyTorch implementation of the
 
 While the original DeepMind release and frameworks like OpenFold are designed for large-scale production, this project is built for **architectural transparency, research experimentation, and hands-on learning**. It breaks down the structural biology pipeline into inspectable, hackable modules, allowing researchers and students to study how Multiple Sequence Alignments (MSA), pair representations, and geometric heads interact at the tensor level.
 
-It is also designed with accessibility in mind for people who do not have access to large training clusters. For that reason, we include `notebooks/Alpha_Fold.ipynb`, a complete notebook that makes it easier to explore the project end-to-end from environments such as **Google Colab** or **Kaggle**, without needing a heavy local setup.
+It is also designed with accessibility in mind for people who do not have access to large training clusters. For that reason, we include `notebooks/Alpha_Fold_Spanish.ipynb`, a complete notebook that makes it easier to explore the project end-to-end from environments such as **Google Colab** or **Kaggle**, without needing a heavy local setup.
 
 More broadly, the goal is to make this architecture genuinely accessible to study: anyone should be able to inspect, modify, and run meaningful experiments with the model, adapting its scale to the hardware they actually have rather than being excluded by the need for large training infrastructure.
 
@@ -101,6 +101,10 @@ To make experimentation easier to reproduce, the repository follows a **manifest
 - `config/experiments/af2_poc.yaml` — lightweight proof-of-concept experiment config.
 - `config/experiments/alphafold2_full_reference.yaml` — reference values collected from AlphaFold/OpenFold-style configs.
 
+### Bundled test data
+
+The repository includes a tiny downloaded test subset under `data/af_subset_showcase` together with `data/showcase_manifest.csv`, so the data pipeline can be sanity-checked without downloading the full dataset first.
+
 ---
 
 ## Quickstart
@@ -160,43 +164,111 @@ from data.dataloaders import FoldbenchProteinDataset
 dataset = FoldbenchProteinDataset(manifest_csv="data/Proteinas_secuencias.csv")
 ```
 
----
+## Training
 
-## Bundled Showcase Data
+### Minimal Python setup
 
-The repository now includes a tiny real-data showcase under `data/af_subset_showcase` plus:
+The full notebook `notebooks/train_model_local.ipynb` version exposes many knobs, but the smallest useful training setup looks like this:
 
-- `data/showcase_manifest.csv`
-- `data/showcase_manifest.yaml`
-- `data/showcase_targets.txt`
+```python
+import torch
+from torch.utils.data import DataLoader
 
-Current showcase targets:
+from data.collate_proteins import collate_proteins
+from data.dataloaders import AA_VOCAB, FoldbenchProteinDataset
+from model.alphafold2 import AlphaFold2
+from model.alphafold2_full_loss import AlphaFoldLoss
+from training.autocast import build_amp_config
+from training.ema import EMA
+from training.scheduler_warmup import build_optimizer_and_scheduler
+from training.train_alphafold2 import train_alphafold2
 
-- `7qrj_A`
-- `7qrr_A`
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-This showcase subset is intentionally small, around `2.2M` on disk, so it can be versioned in the repository as a reproducible sanity-check for the data pipeline without dragging in a large benchmark snapshot.
 
-You can validate the real local data path with:
+# You need to download first the data
+dataset = FoldbenchProteinDataset(
+    manifest_csv="data/showcase_manifest.csv",
+    max_msa_seqs=128,
+)
+loader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_proteins)
+
+model = AlphaFold2(
+    n_tokens=max(AA_VOCAB.values()) + 1,
+    pad_idx=AA_VOCAB["-"],
+    c_m=256,
+    c_z=128,
+    c_s=256,
+    num_evoformer_blocks=2,
+    num_structure_blocks=4,
+    n_torsions=3,
+).to(device)
+
+criterion = AlphaFoldLoss()
+total_steps = 20 * len(loader)
+optimizer, scheduler = build_optimizer_and_scheduler(
+    model=model,
+    lr=1e-4,
+    weight_decay=1e-4,
+    total_steps=total_steps,
+    warmup_steps=max(10, int(0.05 * total_steps)),
+)
+ema = EMA(model, decay=0.999, device="cpu", use_num_updates=True)
+amp_cfg = build_amp_config(device=device, amp_enabled=True, amp_dtype="bf16")
+
+ideal_backbone_local = torch.tensor([
+    [-1.458, 0.000, 0.000],
+    [0.000, 0.000, 0.000],
+    [0.547, 1.426, 0.000],
+    [0.224, 2.617, 0.000],
+], dtype=torch.float32, device=device)
+
+result = train_alphafold2(
+    model=model,
+    train_loader=loader,
+    optimizer=optimizer,
+    criterion=criterion,
+    scheduler=scheduler,
+    ema=ema,
+    scaler=amp_cfg["scaler"],
+    device=device,
+    epochs=20,
+    amp_enabled=amp_cfg["amp_enabled"],
+    amp_dtype=amp_cfg["amp_dtype_requested"],
+    ideal_backbone_local=ideal_backbone_local,
+    ckpt_dir="checkpoints_af2",
+    run_name="af2_poc",
+)
+```
+
+### CLI training
+
+For the standard single-device launcher:
 
 ```bash
-python3 scripts/prepare_data.py loader-smoke \
+python3 scripts/train_model.py --config config/experiments/af2_poc.yaml --device cuda
+```
+
+For 2 GPUs with data parallelism through DDP:
+
+```bash
+torchrun --nproc_per_node=2 scripts/train_parallel.py \
   --config config/experiments/af2_poc.yaml \
   --manifest-csv data/showcase_manifest.csv \
-  --batch-size 2 \
-  --max-samples 2
+  --parallel-mode ddp
 ```
 
-And inspect one of the bundled structures with:
+For 2 GPUs with model parallelism:
 
 ```bash
-python3 scripts/inspect_data.py protein-3d \
-  --cif-path data/af_subset_showcase/reference_structures/7qrj-assembly1_68.cif \
-  --chain-id A \
-  --output artifacts/showcase_7qrj_backbone.png
+python3 scripts/train_parallel.py \
+  --config config/experiments/af2_poc.yaml \
+  --manifest-csv data/showcase_manifest.csv \
+  --parallel-mode model \
+  --model-devices cuda:0,cuda:1
 ```
 
-
+The hybrid mode `--parallel-mode hybrid` is also available, but it is intended for multi-replica setups and typically needs at least 4 GPUs.
 
 ---
 
