@@ -17,6 +17,73 @@ from model.triangle_multiplication import *
 from model.outer_product_mean import *
 
 
+class SharedDropout(nn.Module):
+    """
+    AlphaFold-style shared-mask dropout.
+
+    La idea:
+    - dropout normal: máscara independiente por entrada
+    - shared dropout: la máscara se comparte a lo largo de una dimensión
+
+    Ejemplos típicos:
+    - MSA:  x.shape = [B, S, R, C]
+    - Pair: x.shape = [B, R, R, C]
+
+    Si shared_dim = -3:
+        máscara con shape [B, 1, R, C] en MSA
+        máscara con shape [B, 1, R, C] en Pair
+        => se comparte a lo largo de la dimensión "row"
+
+    Si shared_dim = -2:
+        máscara con shape [B, R, 1, C] en Pair
+        => se comparte a lo largo de la dimensión "column"
+    """
+
+    def __init__(self, p: float, shared_dim: int):
+        super().__init__()
+        if not (0.0 <= p < 1.0):
+            raise ValueError(f"dropout probability must be in [0, 1), got {p}")
+        self.p = float(p)
+        self.shared_dim = int(shared_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if (not self.training) or self.p == 0.0:
+            return x
+
+        ndim = x.ndim
+        shared_dim = self.shared_dim if self.shared_dim >= 0 else ndim + self.shared_dim
+        if not (0 <= shared_dim < ndim):
+            raise ValueError(
+                f"shared_dim={self.shared_dim} is invalid for tensor with ndim={ndim}"
+            )
+
+        mask_shape = list(x.shape)
+        mask_shape[shared_dim] = 1
+
+        keep_prob = 1.0 - self.p
+        mask = x.new_empty(mask_shape).bernoulli_(keep_prob) / keep_prob
+        return x * mask
+
+class DropoutRowwise(SharedDropout):
+    """
+    Share dropout mask across the row dimension.
+    For tensors [B, S, R, C] or [B, R, R, C], row dim is -3.
+    """
+    def __init__(self, p: float):
+        super().__init__(p=p, shared_dim=-3)
+
+
+class DropoutColumnwise(SharedDropout):
+    """
+    Share dropout mask across the column dimension.
+    For pair tensors [B, R, R, C], column dim is -2.
+    """
+    def __init__(self, p: float):
+        super().__init__(p=p, shared_dim=-2)
+
+
+
+
 class EvoformerBlock(nn.Module):
     """
     Canonical AlphaFold2-style Evoformer block.
@@ -171,7 +238,10 @@ class EvoformerBlock(nn.Module):
             c_z=c_z,
             expansion=transition_expansion,)
 
-        self.dropout = nn.Dropout(dropout)
+        self.msa_row_dropout = DropoutRowwise(0.15)
+        self.pair_row_dropout = DropoutRowwise(0.25)
+        self.pair_col_dropout = DropoutColumnwise(0.25)
+
 
         self._freeze_module(
             self.tri_mul_out,
@@ -217,24 +287,24 @@ class EvoformerBlock(nn.Module):
 
     def forward(self, m, z, msa_mask=None, pair_mask=None):
         # ----- MSA stack -----
-        m = m + self.dropout(self.msa_row_attn(m, z, msa_mask))
-        m = m + self.dropout(self.msa_col_attn(m, msa_mask))
-        m = m + self.dropout(self.msa_transition(m, msa_mask))
+        m = m + self.msa_row_dropout(self.msa_row_attn(m, z, msa_mask))
+        m = m + self.msa_col_attn(m, msa_mask)
+        m = m + self.msa_transition(m, msa_mask)
 
         # ----- MSA -> Pair -----
-        z = z + self.dropout(self.outer_product_mean(m, msa_mask))
+        z = z + self.outer_product_mean(m, msa_mask)
 
         # ----- Pair stack -----
         if self.pair_stack_enabled:
             if self.triangle_multiplication_enabled:
-                z = z + self.dropout(self.tri_mul_out(z, pair_mask))
-                z = z + self.dropout(self.tri_mul_in(z, pair_mask))
+                z = z + self.pair_row_dropout(self.tri_mul_out(z, pair_mask))
+                z = z + self.pair_row_dropout(self.tri_mul_in(z, pair_mask))
 
             if self.triangle_attention_enabled:
-                z = z + self.dropout(self.tri_attn_start(z, pair_mask))
-                z = z + self.dropout(self.tri_attn_end(z, pair_mask))
+                z = z + self.pair_row_dropout(self.tri_attn_start(z, pair_mask))
+                z = z + self.pair_col_dropout(self.tri_attn_end(z, pair_mask))
 
             if self.pair_transition_enabled:
-                z = z + self.dropout(self.pair_transition(z, pair_mask))
+                z = z + self.pair_transition(z, pair_mask)
 
         return m, z
