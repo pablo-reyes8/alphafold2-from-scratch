@@ -36,7 +36,7 @@ from training.seeds import seed_everything
 from training.train_alphafold2 import train_alphafold2
 from training.train_parallel.data_parallel import (
     build_parallel_context,
-    build_parallel_train_loader,
+    build_parallel_train_eval_loaders,
     cleanup_parallel_context,
     wrap_model_for_data_parallel,
 )
@@ -63,6 +63,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-batches", type=int, default=None)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None, help="Per-process batch size.")
+    parser.add_argument("--eval-size", type=int, default=None)
     parser.add_argument("--resume-path", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--deterministic", action="store_true")
@@ -108,7 +109,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         batch_size = 1 if args.dry_run and args.batch_size is None else int(
             args.batch_size or loader_cfg.get("batch_size", 1)
         )
-        loader = build_parallel_train_loader(
+        loader, eval_loader, split_info_train, split_info_eval = build_parallel_train_eval_loaders(
             dataset,
             batch_size=batch_size,
             shuffle=False if args.dry_run else bool(loader_cfg.get("shuffle", True)),
@@ -116,6 +117,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             pin_memory=bool(loader_cfg.get("pin_memory", False)),
             drop_last=bool(loader_cfg.get("drop_last", False)),
             context=context,
+            eval_size=0 if args.dry_run else int(loader_cfg.get("eval_size", 0) if args.eval_size is None else args.eval_size),
+            eval_shuffle=bool(loader_cfg.get("eval_shuffle", False)),
+            split_seed=int(loader_cfg.get("split_seed", 42)),
+            shuffle_before_split=bool(loader_cfg.get("shuffle_before_split", False)),
         )
 
         if context.model_parallel:
@@ -176,6 +181,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                     "rank": context.rank,
                     "stage_devices": [str(device) for device in context.stage_devices],
                     "dataset_examples": len(dataset),
+                    "train_examples": len(split_info_train),
+                    "eval_examples": len(split_info_eval),
                     "loader_batch_size_per_process": batch_size,
                     "epochs": epochs,
                     "max_batches": max_batches,
@@ -191,6 +198,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         train_alphafold2(
             model=model,
             train_loader=loader,
+            eval_loader=eval_loader,
             optimizer=optimizer,
             criterion=criterion,
             scheduler=scheduler,
@@ -215,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             run_name=str(trainer_cfg.get("run_name", "alphafold2")),
             save_every=int(trainer_cfg.get("save_every", 1)),
             save_last=bool(trainer_cfg.get("save_last", True)),
+            eval_every=int(trainer_cfg.get("eval_every", 1)),
             monitor_name=str(trainer_cfg.get("monitor_name", "loss")),
             monitor_mode=str(trainer_cfg.get("monitor_mode", "min")),
             config=config,

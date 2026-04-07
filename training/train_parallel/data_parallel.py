@@ -14,10 +14,11 @@ from typing import Any
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from data.collate_proteins import collate_proteins
+from data.loader_wrappers import resolve_train_eval_indices
 
 
 LOSS_AVERAGE_KEYS = (
@@ -213,6 +214,65 @@ def build_parallel_train_loader(
         drop_last=bool(drop_last),
         collate_fn=collate_fn,
     )
+
+
+def build_parallel_train_eval_loaders(
+    dataset,
+    *,
+    batch_size: int,
+    shuffle: bool = True,
+    num_workers: int = 0,
+    pin_memory: bool = False,
+    drop_last: bool = False,
+    context: ParallelContext | None = None,
+    collate_fn=collate_proteins,
+    eval_size: int = 1,
+    eval_shuffle: bool = False,
+    split_seed: int = 42,
+    shuffle_before_split: bool = False,
+):
+    """Build deterministic train/eval parallel dataloaders from one dataset."""
+    resolved_eval_size = int(eval_size or 0)
+    if resolved_eval_size <= 0:
+        train_loader = build_parallel_train_loader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            drop_last=drop_last,
+            context=context,
+            collate_fn=collate_fn,
+        )
+        return train_loader, None, tuple(range(len(dataset))), tuple()
+
+    train_indices, eval_indices = resolve_train_eval_indices(
+        len(dataset),
+        eval_size=resolved_eval_size,
+        split_seed=split_seed,
+        shuffle_before_split=shuffle_before_split,
+    )
+    train_loader = build_parallel_train_loader(
+        Subset(dataset, list(train_indices)),
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=drop_last,
+        context=context,
+        collate_fn=collate_fn,
+    )
+    eval_loader = build_parallel_train_loader(
+        Subset(dataset, list(eval_indices)),
+        batch_size=batch_size,
+        shuffle=eval_shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=False,
+        context=context,
+        collate_fn=collate_fn,
+    )
+    return train_loader, eval_loader, train_indices, eval_indices
 
 
 def wrap_model_for_data_parallel(

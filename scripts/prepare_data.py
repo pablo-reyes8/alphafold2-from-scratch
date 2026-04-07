@@ -19,7 +19,14 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.common import build_dataloader_from_config, build_dataset_from_config, load_yaml_config, summarize_batch, summarize_dataset
+from scripts.common import (
+    build_dataloader_from_config,
+    build_dataset_from_config,
+    build_train_eval_dataloaders_from_config,
+    load_yaml_config,
+    summarize_batch,
+    summarize_dataset,
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -55,6 +62,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     smoke_cmd.add_argument("--manifest-csv", type=str, default=None)
     smoke_cmd.add_argument("--batch-size", type=int, default=None)
     smoke_cmd.add_argument("--max-samples", type=int, default=2)
+
+    split_smoke_cmd = subparsers.add_parser(
+        "train-eval-loader-smoke",
+        help="Build deterministic train/eval dataloaders and print one batch summary from each split.",
+    )
+    split_smoke_cmd.add_argument("--config", type=str, default="config/experiments/af2_low_vram.yaml")
+    split_smoke_cmd.add_argument("--manifest-csv", type=str, default=None)
+    split_smoke_cmd.add_argument("--batch-size", type=int, default=None)
+    split_smoke_cmd.add_argument("--max-samples", type=int, default=2)
+    split_smoke_cmd.add_argument("--eval-size", type=int, default=None)
 
     bootstrap_cmd = subparsers.add_parser("bootstrap", help="Run download, manifest refresh, and loader smoke in sequence.")
     bootstrap_cmd.add_argument("--data-config", type=str, default="config/data/foldbench_subset.yaml")
@@ -153,6 +170,40 @@ def run_loader_smoke(args: argparse.Namespace) -> None:
     print(f"[scripts.prepare_data] batch summary: {summarize_batch(batch)}")
 
 
+def run_train_eval_loader_smoke(args: argparse.Namespace) -> None:
+    config = load_yaml_config(args.config)
+    dataset = build_dataset_from_config(
+        config,
+        manifest_csv=args.manifest_csv,
+        max_samples=args.max_samples,
+        verbose=False,
+    )
+    train_loader, eval_loader, split_info = build_train_eval_dataloaders_from_config(
+        dataset,
+        config,
+        batch_size=args.batch_size,
+        shuffle=False,
+        eval_size=args.eval_size,
+    )
+
+    dataset_summary = summarize_dataset(dataset)
+    print(f"[scripts.prepare_data] dataset summary: {dataset_summary}")
+    print(
+        "[scripts.prepare_data] split summary: "
+        f"train_examples={len(split_info['train_indices'])}, eval_examples={len(split_info['eval_indices'])}"
+    )
+
+    if len(dataset) == 0:
+        raise ValueError("Train/eval loader smoke found zero valid examples. Check the manifest paths and drop reasons above.")
+    if eval_loader is None:
+        raise ValueError("Train/eval loader smoke requires eval_size > 0 and at least one eval example.")
+
+    train_batch = next(iter(train_loader))
+    eval_batch = next(iter(eval_loader))
+    print(f"[scripts.prepare_data] train batch summary: {summarize_batch(train_batch)}")
+    print(f"[scripts.prepare_data] eval batch summary: {summarize_batch(eval_batch)}")
+
+
 def run_bootstrap(args: argparse.Namespace) -> None:
     if not args.skip_download:
         run_download(
@@ -210,6 +261,10 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     if args.command == "loader-smoke":
         run_loader_smoke(args)
+        return
+
+    if args.command == "train-eval-loader-smoke":
+        run_train_eval_loader_smoke(args)
         return
 
     if args.command == "bootstrap":

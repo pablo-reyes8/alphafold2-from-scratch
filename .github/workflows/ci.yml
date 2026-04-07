@@ -43,6 +43,16 @@ jobs:
             tests/test_template_stack.py \
             tests/test_metrics.py \
             tests/test_loader_wrappers.py \
+            tests/test_parallel_loader_split.py \
             tests/test_showcase_loader.py \
             tests/test_train_eval_orchestration.py \
             tests/test_eval_one_epoch.py
+
+      - name: Run train eval loader CLI smoke
+        run: |
+          python -m scripts.prepare_data train-eval-loader-smoke \
+            --config config/experiments/af2_low_vram.yaml \
+            --manifest-csv data/showcase_manifest.csv \
+            --batch-size 1 \
+            --max-samples 2 \
+            --eval-size 1

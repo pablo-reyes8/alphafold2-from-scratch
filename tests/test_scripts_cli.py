@@ -137,6 +137,22 @@ def test_prepare_cli_parses_bootstrap_command():
     assert args.max_samples == 1
 
 
+def test_prepare_cli_parses_train_eval_loader_smoke_command():
+    args = parse_prepare_args(
+        [
+            "train-eval-loader-smoke",
+            "--config",
+            "config/experiments/af2_low_vram.yaml",
+            "--manifest-csv",
+            "data/showcase_manifest.csv",
+            "--eval-size",
+            "1",
+        ]
+    )
+    assert args.command == "train-eval-loader-smoke"
+    assert args.eval_size == 1
+
+
 def test_inspect_cli_parses_protein_3d_command():
     args = parse_inspect_args(
         [
@@ -175,6 +191,8 @@ def test_train_cli_parses_training_overrides():
             "--device",
             "cpu",
             "--dry-run",
+            "--eval-size",
+            "1",
             "--stochastic-recycling",
             "--max-recycles",
             "3",
@@ -182,6 +200,7 @@ def test_train_cli_parses_training_overrides():
     )
     assert args.device == "cpu"
     assert args.dry_run is True
+    assert args.eval_size == 1
     assert args.stochastic_recycling is True
     assert args.max_recycles == 3
 
@@ -197,8 +216,11 @@ def test_train_parallel_cli_parses_model_parallel_overrides():
             "cuda:0,cuda:1",
             "--batch-size",
             "1",
+            "--eval-size",
+            "1",
         ]
     )
     assert args.parallel_mode == "model"
     assert args.model_devices == "cuda:0,cuda:1"
     assert args.batch_size == 1
+    assert args.eval_size == 1

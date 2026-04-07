@@ -38,6 +38,7 @@ More broadly, the goal is to make this architecture genuinely accessible as an o
 - [Data & Reproducibility](#data--reproducibility)
 - [Repository structure](#repository-structure)
 - [Quickstart](#quickstart)
+- [Data Quickstart](#data-quickstart)
 - [Training](#training)
 - [Ablations Suite](#ablations-suite)
 - [CLI workflows](#cli-workflows)
@@ -68,8 +69,10 @@ The implementation strictly follows the representational flow of the original pa
 To make experimentation easier to reproduce, the repository follows a **manifest-based workflow**. This keeps the data pipeline more organized and makes it easier to move between local environments, notebooks, and scripted runs.
 
 - **Foldbench Support:** Includes scripts to download and preprocess a subset of Foldbench.
-- **Config-Driven Experiments:** Main settings such as model size, depth, learning rate, and EMA can be adjusted through YAML files.
+- **Config-Driven Experiments:** Main settings such as model size, depth, learning rate, EMA, and train/eval split behavior can be adjusted through YAML files.
 - **Feature-Rich Loader:** The current dataloader returns sequence/MSA tensors plus `extra_msa_feat`, `extra_msa_mask`, `template_angle_feat`, `template_pair_feat`, and `template_mask` when those artifacts are present in the Foldbench assets.
+- **Split-Aware Loader Wrappers:** The repo now includes importable wrappers for plain dataloaders and deterministic train/eval splits over a single manifest-backed dataset.
+- **Eval-Ready Training Loop:** `train_alphafold2` can run optional evaluation epochs and checkpoint both train and eval metrics without changing the model architecture.
 - **Data Inspection Utilities:** Provides simple CLI tools to inspect manifests, preview A3M files, and visualize CA distance maps before training.
 - **Notebook-Friendly Workflow:** The main walkthrough notebook is [Alpha_Fold_English.ipynb](notebooks/Alpha_Fold_English.ipynb), and a local training-focused walkthrough is available in [train_model_setup_examples.ipynb](notebooks/train_model_setup_examples.ipynb).
 
@@ -206,6 +209,30 @@ from data.dataloaders import FoldbenchProteinDataset
 
 dataset = FoldbenchProteinDataset(manifest_csv="data/Proteinas_secuencias.csv")
 ```
+
+---
+
+### Data Quickstart
+
+```python
+from data.dataloaders import FoldbenchProteinDataset
+from data.loader_wrappers import build_protein_dataloader, build_train_eval_protein_dataloaders
+
+dataset = FoldbenchProteinDataset(manifest_csv="data/showcase_manifest.csv", verbose=False)
+loader = build_protein_dataloader(dataset, batch_size=2, shuffle=True)
+split = build_train_eval_protein_dataloaders(dataset, batch_size=1, eval_size=1, shuffle=False)
+```
+
+```bash
+python3 -m scripts.prepare_data train-eval-loader-smoke \
+  --config config/experiments/af2_low_vram.yaml \
+  --manifest-csv data/showcase_manifest.csv \
+  --batch-size 1 \
+  --max-samples 2 \
+  --eval-size 1
+```
+
+
 
 ## Training
 
