@@ -23,7 +23,7 @@
 
 ## Overview
 
-This repository provides a **from-scratch, modular PyTorch implementation of the core AlphaFold2 architecture**.
+This repository provides a **from-scratch, modular PyTorch implementation of the AlphaFold2 architecture**.
 
 Where the original DeepMind release and frameworks like OpenFold are designed for large-scale production, this project is built for **architectural transparency, research experimentation, and real hands-on understanding**. It breaks the AlphaFold2 pipeline into inspectable, hackable components so researchers and students can study how Multiple Sequence Alignments (MSA), pair representations, Evoformer updates, and geometric heads interact at the tensor level.
 
@@ -224,21 +224,21 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # You need to download first the data
 dataset = FoldbenchProteinDataset(
     manifest_csv="data/showcase_manifest.csv",
-    max_msa_seqs=128,)
+    max_msa_seqs=128, crop_size=64, random_crop=True,)
 
 loader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_proteins)
 
 model = AlphaFold2(
     n_tokens=max(AA_VOCAB.values()) + 1,
     pad_idx=AA_VOCAB["-"],
-    c_m=256,
-    c_z=128,
-    c_s=256,
     num_evoformer_blocks=2,
     num_structure_blocks=4,
-    n_torsions=3).to(device)
+    n_torsions=3, num_res_blocks_torsion=2,
+    extra_msa_stack_enabled=True, template_stack_enabled=True,
+    ).to(device)
 
 criterion = AlphaFoldLoss()
+
 total_steps = 20 * len(loader)
 optimizer, scheduler = build_optimizer_and_scheduler(
     model=model,
@@ -264,12 +264,15 @@ result = train_alphafold2(
     scheduler=scheduler,
     ema=ema,
     scaler=amp_cfg["scaler"],
+    grad_clip=1.0,
     device=device,
     epochs=20,
     amp_enabled=amp_cfg["amp_enabled"],
     amp_dtype=amp_cfg["amp_dtype_requested"],
     ideal_backbone_local=ideal_backbone_local,
     ckpt_dir="checkpoints_af2",
+    num_recycles=3, 
+    stochastic_recycling=True,
     run_name="af2_poc")
 
 ```
