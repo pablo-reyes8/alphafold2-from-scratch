@@ -27,6 +27,7 @@ BASE_MONITOR_NAMES = {
     "loss",
     "fape_loss",
     "dist_loss",
+    "msa_loss",
     "plddt_loss",
     "torsion_loss",
     "rmsd_logged",
@@ -174,7 +175,7 @@ def train_alphafold2(
             print(f"Eval loader: enabled | eval_every: {max(1, int(eval_every))}")
         print(rule())
         print(
-            f"{'ep':>3} | {'step':>8} | {'loss':>10} | {'fape':>10} | {'dist':>10} | "
+            f"{'ep':>3} | {'step':>8} | {'loss':>10} | {'fape':>10} | {'dist':>10} | {'msa':>10} | "
             f"{'plddt':>10} | {'tors':>10} | {'rmsd':>8} | {'tm':>8} | {'gdt':>8} | {'lr':>9} | {'time':>8}"
         )
         print(rule())
@@ -252,7 +253,7 @@ def train_alphafold2(
         if is_main_process:
             print(
                 f"{epoch:3d} | {global_step:8d} | "
-                f"{train_stats['loss']:10.5f} | {train_stats['fape_loss']:10.5f} | {train_stats['dist_loss']:10.5f} | "
+                f"{train_stats['loss']:10.5f} | {train_stats['fape_loss']:10.5f} | {train_stats['dist_loss']:10.5f} | {train_stats['msa_loss']:10.5f} | "
                 f"{train_stats['plddt_loss']:10.5f} | {train_stats['torsion_loss']:10.5f} | "
                 f"{train_stats['rmsd_logged']:8.3f} | {train_stats['tm_score_logged']:8.3f} | {train_stats['gdt_ts_logged']:8.3f} | "
                 f"{lr_now:9.2e} | {fmt_hms(sec):>8}"
@@ -261,7 +262,7 @@ def train_alphafold2(
                 print(
                     "    eval -> "
                     f"loss: {eval_stats['loss']:.5f} | fape: {eval_stats['fape_loss']:.5f} | "
-                    f"dist: {eval_stats['dist_loss']:.5f} | plddt: {eval_stats['plddt_loss']:.5f} | "
+                    f"dist: {eval_stats['dist_loss']:.5f} | msa: {eval_stats['msa_loss']:.5f} | plddt: {eval_stats['plddt_loss']:.5f} | "
                     f"tors: {eval_stats['torsion_loss']:.5f} | rmsd: {eval_stats['rmsd_logged']:.3f} | "
                     f"tm: {eval_stats['tm_score_logged']:.3f} | gdt: {eval_stats['gdt_ts_logged']:.3f}"
                 )

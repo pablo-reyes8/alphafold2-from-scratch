@@ -17,7 +17,7 @@ from typing import Any
 import torch
 import yaml
 from data.collate_proteins import collate_proteins
-from data.dataloaders import FoldbenchProteinDataset
+from data.dataloaders import FoldbenchProteinDataset, build_masked_msa_inputs
 from data.loader_wrappers import build_protein_dataloader, build_train_eval_protein_dataloaders
 from model.alphafold2 import AlphaFold2
 from model.alphafold2_full_loss import AlphaFoldLoss
@@ -110,6 +110,11 @@ def build_dataset_from_config(
     verbose: bool = True,
 ) -> FoldbenchProteinDataset:
     data_cfg = nested_get(config, "data", default={}) or {}
+    masked_msa_cfg = (
+        nested_get(config, "data", "masked_msa", default=None)
+        or nested_get(config, "data", "common", "masked_msa", default=None)
+        or {}
+    )
     manifest_override = manifest_csv is not None
     return FoldbenchProteinDataset(
         json_path=(
@@ -142,6 +147,30 @@ def build_dataset_from_config(
             else int(data_cfg.get("crop_size"))
         ),
         random_crop=bool(data_cfg.get("random_crop", True)),
+        masked_msa_replace_fraction=float(
+            data_cfg.get(
+                "masked_msa_replace_fraction",
+                masked_msa_cfg.get("replace_fraction", 0.15),
+            )
+        ),
+        masked_msa_profile_prob=float(
+            data_cfg.get(
+                "masked_msa_profile_prob",
+                masked_msa_cfg.get("profile_prob", 0.10),
+            )
+        ),
+        masked_msa_same_prob=float(
+            data_cfg.get(
+                "masked_msa_same_prob",
+                masked_msa_cfg.get("same_prob", 0.10),
+            )
+        ),
+        masked_msa_uniform_prob=float(
+            data_cfg.get(
+                "masked_msa_uniform_prob",
+                masked_msa_cfg.get("uniform_prob", 0.10),
+            )
+        ),
         single_sequence_mode=bool(data_cfg.get("single_sequence_mode", False)),
         max_samples=max_samples,
         verbose=verbose,
@@ -346,6 +375,11 @@ def make_synthetic_batch(
     device: str | torch.device = "cpu",
 ) -> dict[str, torch.Tensor]:
     model_cfg = nested_get(config, "model", default={}) or {}
+    masked_msa_cfg = (
+        nested_get(config, "data", "masked_msa", default=None)
+        or nested_get(config, "data", "common", "masked_msa", default=None)
+        or {}
+    )
     n_tokens = int(model_cfg.get("n_tokens", 27))
     n_torsions = int(model_cfg.get("n_torsions", 3))
 
@@ -354,6 +388,20 @@ def make_synthetic_batch(
 
     seq_mask = torch.ones(batch_size, seq_len, dtype=torch.float32, device=device)
     msa_mask = torch.ones(batch_size, msa_depth, seq_len, dtype=torch.float32, device=device)
+    masked_msa_true = torch.zeros(batch_size, msa_depth, seq_len, dtype=torch.long, device=device)
+    masked_msa_mask = torch.zeros(batch_size, msa_depth, seq_len, dtype=torch.float32, device=device)
+    for batch_index in range(batch_size):
+        masked_tokens, masked_true, masked_mask = build_masked_msa_inputs(
+            msa_tokens[batch_index],
+            msa_mask[batch_index],
+            replace_fraction=float(masked_msa_cfg.get("replace_fraction", 0.15)),
+            profile_prob=float(masked_msa_cfg.get("profile_prob", 0.10)),
+            same_prob=float(masked_msa_cfg.get("same_prob", 0.10)),
+            uniform_prob=float(masked_msa_cfg.get("uniform_prob", 0.10)),
+        )
+        msa_tokens[batch_index] = masked_tokens
+        masked_msa_true[batch_index] = masked_true
+        masked_msa_mask[batch_index] = masked_mask
 
     residue_axis = torch.arange(seq_len, dtype=torch.float32, device=device)
     coords_ca = torch.stack(
@@ -380,6 +428,8 @@ def make_synthetic_batch(
         "msa_tokens": msa_tokens,
         "seq_mask": seq_mask,
         "msa_mask": msa_mask,
+        "masked_msa_true": masked_msa_true,
+        "masked_msa_mask": masked_msa_mask,
         "coords_n": coords_n,
         "coords_ca": coords_ca,
         "coords_c": coords_c,

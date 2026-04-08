@@ -63,3 +63,15 @@ class DistogramHead(nn.Module):
         z_sym = 0.5 * (z + z.transpose(1, 2))        # symmetrize
         logits = self.linear(self.ln(z_sym))         # [B, L, L, num_bins]
         return logits
+
+
+class MaskedMsaHead(nn.Module):
+    def __init__(self, c_m=256, num_classes=23):
+        super().__init__()
+        self.num_classes = num_classes
+        self.ln = nn.LayerNorm(c_m)
+        self.linear = nn.Linear(c_m, num_classes)
+
+    def forward(self, m):
+        logits = self.linear(self.ln(m))
+        return logits

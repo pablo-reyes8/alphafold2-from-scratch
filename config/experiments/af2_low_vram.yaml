@@ -17,6 +17,10 @@ data:
   min_identity: 0.85
   min_template_identity: 0.80
   single_sequence_mode: false
+  masked_msa_replace_fraction: 0.15
+  masked_msa_profile_prob: 0.10
+  masked_msa_same_prob: 0.10
+  masked_msa_uniform_prob: 0.10
   loader:
     batch_size: 1
     shuffle: true
@@ -63,6 +67,8 @@ model:
   template_num_blocks: 1
   structure_pair_context_enabled: true
   distogram_head_enabled: true
+  masked_msa_num_classes: 23
+  masked_msa_head_enabled: true
   plddt_head_enabled: true
   torsion_head_enabled: true
 
@@ -77,6 +83,8 @@ loss:
   w_fape: 0.5
   w_aux: 0.5
   w_dist: 0.3
+  msa_num_classes: 23
+  w_msa: 2.0
   w_plddt: 0.01
   w_torsion: 0.01
 

@@ -25,6 +25,7 @@ LOSS_AVERAGE_KEYS = (
     "loss",
     "fape_loss",
     "dist_loss",
+    "msa_loss",
     "plddt_loss",
     "torsion_loss",
     "num_recycles",

@@ -32,6 +32,8 @@ def test_showcase_dataset_and_dataloader_expose_template_and_extra_msa_features(
     assert len(dataset) == 2
 
     sample = dataset[0]
+    assert sample["masked_msa_true"].shape == sample["msa_tokens"].shape
+    assert sample["masked_msa_mask"].shape == sample["msa_tokens"].shape
     assert sample["extra_msa_feat"].ndim == 3
     assert sample["extra_msa_feat"].shape[-1] == EXTRA_MSA_FEATURE_DIM
     assert sample["extra_msa_mask"].shape == sample["extra_msa_feat"].shape[:2]
@@ -52,6 +54,8 @@ def test_showcase_dataset_and_dataloader_expose_template_and_extra_msa_features(
 
     assert batch["seq_tokens"].shape[0] == 2
     assert batch["msa_tokens"].shape[0] == 2
+    assert batch["masked_msa_true"].shape == batch["msa_tokens"].shape
+    assert batch["masked_msa_mask"].shape == batch["msa_mask"].shape
     assert batch["extra_msa_feat"] is not None
     assert batch["extra_msa_mask"] is not None
     assert batch["template_angle_feat"] is not None
@@ -82,6 +86,8 @@ def test_showcase_dataset_random_crop_keeps_all_modalities_aligned():
     assert sample["seq_tokens"].shape == (64,)
     assert sample["msa_tokens"].shape[1] == 64
     assert sample["msa_mask"].shape[1] == 64
+    assert sample["masked_msa_true"].shape[1] == 64
+    assert sample["masked_msa_mask"].shape[1] == 64
     assert sample["coords_n"].shape == (64, 3)
     assert sample["coords_ca"].shape == (64, 3)
     assert sample["coords_c"].shape == (64, 3)
@@ -106,6 +112,8 @@ def test_showcase_dataset_random_crop_keeps_all_modalities_aligned():
 
     assert batch["seq_tokens"].shape == (2, 64)
     assert batch["msa_tokens"].shape[-1] == 64
+    assert batch["masked_msa_true"].shape[-1] == 64
+    assert batch["masked_msa_mask"].shape[-1] == 64
     assert batch["extra_msa_feat"].shape[2] == 64
     assert batch["template_angle_feat"].shape[2] == 64
     assert batch["template_pair_feat"].shape[2:4] == (64, 64)

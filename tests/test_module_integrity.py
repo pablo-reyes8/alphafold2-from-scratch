@@ -21,6 +21,7 @@ MODULES = [
     "model.losses.distogram_loss",
     "model.losses.fape_loss",
     "model.losses.loss_helpers",
+    "model.losses.masked_msa_loss",
     "model.losses.pLDDT_loss",
     "model.losses.structure_aux_loss",
     "model.losses.torsion_loss",

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from data.dataloaders import build_masked_msa_inputs
 from model.alphafold2 import AlphaFold2
 from model.alphafold2_full_loss import AlphaFoldLoss
 
@@ -40,6 +41,16 @@ def toy_batch(ideal_backbone_local):
     seq_mask = torch.ones(batch_size, length, dtype=torch.float32)
     seq_mask[0, -1] = 0.0
     msa_mask = seq_mask[:, None, :].repeat(1, msa_depth, 1)
+    masked_msa_true = torch.zeros(batch_size, msa_depth, length, dtype=torch.long)
+    masked_msa_mask = torch.zeros(batch_size, msa_depth, length, dtype=torch.float32)
+    for batch_index in range(batch_size):
+        masked_tokens, masked_true, masked_mask = build_masked_msa_inputs(
+            msa_tokens[batch_index],
+            msa_mask[batch_index],
+        )
+        msa_tokens[batch_index] = masked_tokens
+        masked_msa_true[batch_index] = masked_true
+        masked_msa_mask[batch_index] = masked_mask
 
     residue_axis = torch.arange(length, dtype=torch.float32)
     coords_ca = torch.stack(
@@ -65,6 +76,8 @@ def toy_batch(ideal_backbone_local):
         "msa_tokens": msa_tokens,
         "seq_mask": seq_mask,
         "msa_mask": msa_mask,
+        "masked_msa_true": masked_msa_true,
+        "masked_msa_mask": masked_msa_mask,
         "coords_n": coords_n,
         "coords_ca": coords_ca,
         "coords_c": coords_c,
@@ -114,6 +127,7 @@ def toy_criterion():
         w_fape=0.5,
         w_aux=0.5,
         w_dist=0.3,
+        w_msa=2.0,
         w_plddt=0.01,
         w_torsion=0.01,
     )

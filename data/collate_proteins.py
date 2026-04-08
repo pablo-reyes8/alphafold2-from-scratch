@@ -19,6 +19,8 @@ def collate_proteins(batch):
 
     msa_tokens = torch.full((batch_size, max_msa_depth, max_length), pad_token, dtype=torch.long)
     msa_mask = torch.zeros((batch_size, max_msa_depth, max_length), dtype=torch.float32)
+    masked_msa_true = torch.zeros((batch_size, max_msa_depth, max_length), dtype=torch.long)
+    masked_msa_mask = torch.zeros((batch_size, max_msa_depth, max_length), dtype=torch.float32)
 
     extra_msa_feat = None
     extra_msa_mask = None
@@ -78,6 +80,8 @@ def collate_proteins(batch):
 
         msa_tokens[index, :msa_depth, :length] = item["msa_tokens"]
         msa_mask[index, :msa_depth, :length] = item["msa_mask"]
+        masked_msa_true[index, :msa_depth, :length] = item["masked_msa_true"]
+        masked_msa_mask[index, :msa_depth, :length] = item["masked_msa_mask"]
 
         if extra_msa_feat is not None and extra_depth > 0:
             extra_msa_feat[index, :extra_depth, :length] = item["extra_msa_feat"][:, :length]
@@ -128,6 +132,8 @@ def collate_proteins(batch):
         "seq_mask": seq_mask,
         "msa_tokens": msa_tokens,
         "msa_mask": msa_mask,
+        "masked_msa_true": masked_msa_true,
+        "masked_msa_mask": masked_msa_mask,
         "extra_msa_feat": extra_msa_feat,
         "extra_msa_mask": extra_msa_mask,
         "template_angle_feat": template_angle_feat,

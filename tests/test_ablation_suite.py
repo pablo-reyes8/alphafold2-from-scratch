@@ -185,6 +185,7 @@ def test_alphafold2_ablation_defaults_are_explicit_and_baseline_safe():
     assert AlphaFold2.resolve_ablation_defaults(1)["evoformer_pair_stack_enabled"] is False
     assert AlphaFold2.resolve_ablation_defaults(2)["evoformer_triangle_attention_enabled"] is False
     assert AlphaFold2.resolve_ablation_defaults(2)["recycle_single_enabled"] is False
+    assert AlphaFold2.resolve_ablation_defaults(3)["masked_msa_head_enabled"] is False
     assert AlphaFold2.resolve_ablation_defaults(3)["plddt_head_enabled"] is False
     assert AlphaFold2.resolve_ablation_defaults(4)["use_block_specific_params"] is True
     assert AlphaFold2.resolve_ablation_defaults(5)["recycle_single_enabled"] is False
@@ -198,13 +199,14 @@ def test_alphafold_loss_ablation_defaults_match_named_suite():
     assert AlphaFoldLoss.resolve_ablation_defaults(3) == {
         "w_aux": 0.0,
         "w_dist": 0.0,
+        "w_msa": 0.0,
         "w_plddt": 0.0,
         "w_torsion": 0.0,
     }
 
 
 def test_loss_gracefully_skips_disabled_auxiliary_terms():
-    criterion = AlphaFoldLoss(w_fape=0.0, w_aux=0.0, w_dist=0.0, w_plddt=0.0, w_torsion=0.0)
+    criterion = AlphaFoldLoss(w_fape=0.0, w_aux=0.0, w_dist=0.0, w_msa=0.0, w_plddt=0.0, w_torsion=0.0)
 
     coords_n = torch.tensor([[[0.0, -1.0, 0.0], [1.0, -1.0, 0.0], [2.0, -1.0, 0.0]]], dtype=torch.float32)
     coords_ca = torch.tensor([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]], dtype=torch.float32)
@@ -214,6 +216,7 @@ def test_loss_gracefully_skips_disabled_auxiliary_terms():
         "R": torch.eye(3, dtype=torch.float32).view(1, 1, 3, 3).expand(1, 3, 3, 3).clone(),
         "t": torch.zeros(1, 3, 3, dtype=torch.float32),
         "distogram_logits": None,
+        "masked_msa_logits": None,
         "plddt_logits": None,
         "torsions": None,
     }
@@ -231,6 +234,7 @@ def test_loss_gracefully_skips_disabled_auxiliary_terms():
     assert float(losses["fape_loss"].item()) == 0.0
     assert float(losses["aux_loss"].item()) == 0.0
     assert float(losses["dist_loss"].item()) == 0.0
+    assert float(losses["msa_loss"].item()) == 0.0
     assert float(losses["plddt_loss"].item()) == 0.0
     assert float(losses["torsion_loss"].item()) == 0.0
 

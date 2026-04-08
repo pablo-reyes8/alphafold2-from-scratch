@@ -1,8 +1,8 @@
 """Composite AlphaFold-style loss orchestration.
 
 This module combines final-structure FAPE, intermediate structure auxiliary
-losses, distogram, pLDDT, and torsion supervision into the single loss
-dictionary consumed by the training loop. It acts as the contract between
+losses, distogram, masked-MSA, pLDDT, and torsion supervision into the single
+loss dictionary consumed by the training loop. It acts as the contract between
 model outputs and the structural targets prepared by the dataloader.
 """
 
@@ -12,6 +12,7 @@ import torch.nn as nn
 from model.losses.fape_loss import * 
 from model.losses.pLDDT_loss import * 
 from model.losses.distogram_loss import * 
+from model.losses.masked_msa_loss import *
 from model.losses.torsion_loss import * 
 from model.losses.loss_helpers import *
 from model.losses.structure_aux_loss import StructureAuxLoss
@@ -25,6 +26,7 @@ class AlphaFoldLoss(nn.Module):
             0.5  * fape_loss +
             0.5  * aux_loss +
             0.3  * dist_loss +
+            2.0  * msa_loss +
             0.01 * plddt_loss +
             0.01 * torsion_loss
         )
@@ -49,7 +51,7 @@ class AlphaFoldLoss(nn.Module):
             None: {},
             1: {"w_plddt": 0.0},
             2: {"w_plddt": 0.0},
-            3: {"w_aux": 0.0, "w_dist": 0.0, "w_plddt": 0.0, "w_torsion": 0.0},
+            3: {"w_aux": 0.0, "w_dist": 0.0, "w_msa": 0.0, "w_plddt": 0.0, "w_torsion": 0.0},
             4: {},
             5: {},
         }
@@ -65,12 +67,14 @@ class AlphaFoldLoss(nn.Module):
         dist_num_bins=64,
         dist_min_bin=2.0,
         dist_max_bin=22.0,
+        msa_num_classes=23,
         plddt_num_bins=50,
         plddt_inclusion_radius=15.0,
         ablation=None,
         w_fape=0.5,
         w_aux=0.5,
         w_dist=0.3,
+        w_msa=2.0,
         w_plddt=0.01,
         w_torsion=0.01,):
       
@@ -80,6 +84,7 @@ class AlphaFoldLoss(nn.Module):
         w_fape = ablation_defaults.get("w_fape", w_fape)
         w_aux = ablation_defaults.get("w_aux", w_aux)
         w_dist = ablation_defaults.get("w_dist", w_dist)
+        w_msa = ablation_defaults.get("w_msa", w_msa)
         w_plddt = ablation_defaults.get("w_plddt", w_plddt)
         w_torsion = ablation_defaults.get("w_torsion", w_torsion)
 
@@ -92,6 +97,8 @@ class AlphaFoldLoss(nn.Module):
             num_bins=dist_num_bins,
             min_bin=dist_min_bin,
             max_bin=dist_max_bin,)
+
+        self.msa_loss_fn = MaskedMsaLoss(num_classes=msa_num_classes)
 
         self.plddt_loss_fn = PlddtLoss(
             num_bins=plddt_num_bins,
@@ -107,6 +114,7 @@ class AlphaFoldLoss(nn.Module):
         self.w_fape = w_fape
         self.w_aux = w_aux
         self.w_dist = w_dist
+        self.w_msa = w_msa
         self.w_plddt = w_plddt
         self.w_torsion = w_torsion
 
@@ -206,6 +214,20 @@ class AlphaFoldLoss(nn.Module):
         else:
             dist_loss = zero
 
+        if (
+            (self.w_msa > 0.0)
+            and (out.get("masked_msa_logits", None) is not None)
+            and ("masked_msa_true" in batch)
+            and ("masked_msa_mask" in batch)
+        ):
+            msa_loss = self.msa_loss_fn(
+                masked_msa_logits=out["masked_msa_logits"],
+                masked_msa_true=batch["masked_msa_true"],
+                masked_msa_mask=batch["masked_msa_mask"],
+            )
+        else:
+            msa_loss = zero
+
         if (self.w_plddt > 0.0) and (out.get("plddt_logits", None) is not None):
             plddt_loss = self.plddt_loss_fn(
                 plddt_logits=out["plddt_logits"],
@@ -235,6 +257,7 @@ class AlphaFoldLoss(nn.Module):
             self.w_fape * fape_loss +
             self.w_aux * aux_loss +
             self.w_dist * dist_loss +
+            self.w_msa * msa_loss +
             self.w_plddt * plddt_loss +
             self.w_torsion * torsion_loss)
 
@@ -245,5 +268,6 @@ class AlphaFoldLoss(nn.Module):
             "aux_fape_loss": aux_fape_loss.detach(),
             "aux_torsion_loss": aux_torsion_loss.detach(),
             "dist_loss": dist_loss.detach(),
+            "msa_loss": msa_loss.detach(),
             "plddt_loss": plddt_loss.detach(),
             "torsion_loss": torsion_loss.detach()}

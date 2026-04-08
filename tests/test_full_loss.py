@@ -68,7 +68,9 @@ def test_real_batch_alphafold_loss_orchestrator(loader, device="cpu"):
     batch = move_batch_to_device(batch, device)
 
     B, L = batch["seq_tokens"].shape
+    msa_depth = batch["msa_tokens"].shape[1]
     num_dist_bins = 64
+    num_msa_classes = 23
     num_plddt_bins = 50
     T = batch["torsion_true"].shape[2]   # debería ser 3
 
@@ -77,6 +79,7 @@ def test_real_batch_alphafold_loss_orchestrator(loader, device="cpu"):
         "R": torch.eye(3, device=device).view(1, 1, 3, 3).repeat(B, L, 1, 1),
         "t": batch["coords_ca"].clone(),   # usar CA real como predicción fácil
         "distogram_logits": torch.randn(B, L, L, num_dist_bins, device=device),
+        "masked_msa_logits": torch.randn(B, msa_depth, L, num_msa_classes, device=device),
         "plddt_logits": torch.randn(B, L, num_plddt_bins, device=device),
         "torsions": batch["torsion_true"].clone(),  # predicción perfecta para torsiones
     }
@@ -87,11 +90,13 @@ def test_real_batch_alphafold_loss_orchestrator(loader, device="cpu"):
         dist_num_bins=num_dist_bins,
         dist_min_bin=2.0,
         dist_max_bin=22.0,
+        msa_num_classes=num_msa_classes,
         plddt_num_bins=num_plddt_bins,
         plddt_inclusion_radius=15.0,
         w_fape=0.5,
         w_aux=0.5,
         w_dist=0.3,
+        w_msa=2.0,
         w_plddt=0.01,
         w_torsion=0.01,
     )
@@ -102,7 +107,7 @@ def test_real_batch_alphafold_loss_orchestrator(loader, device="cpu"):
     assert torch.isfinite(losses["loss"]), "Total AlphaFold loss is not finite"
     assert losses["loss"].ndim == 0, "Total loss should be scalar"
 
-    for name in ["fape_loss", "aux_loss", "dist_loss", "plddt_loss", "torsion_loss"]:
+    for name in ["fape_loss", "aux_loss", "dist_loss", "msa_loss", "plddt_loss", "torsion_loss"]:
         assert name in losses, f"Missing {name}"
         assert torch.isfinite(losses[name]), f"{name} is not finite"
 
@@ -113,6 +118,7 @@ def test_real_batch_alphafold_loss_orchestrator(loader, device="cpu"):
     assert out["R"].shape == (B, L, 3, 3)
     assert out["t"].shape == (B, L, 3)
     assert out["distogram_logits"].shape == (B, L, L, num_dist_bins)
+    assert out["masked_msa_logits"].shape == (B, msa_depth, L, num_msa_classes)
     assert out["plddt_logits"].shape == (B, L, num_plddt_bins)
     assert out["torsions"].shape == batch["torsion_true"].shape
     assert T == 3, f"Expected 3 torsions, got {T}"
@@ -166,6 +172,9 @@ def make_fake_alphafold_batch(B=2, L=20, T=3, device="cpu", dtype=torch.float32)
 
     torsion_mask = torch.ones(B, L, T, device=device, dtype=dtype)
     torsion_mask[0, -2:, :] = 0.0
+    masked_msa_true = torch.randint(0, 23, (B, 4, L), device=device, dtype=torch.long)
+    masked_msa_mask = torch.ones(B, 4, L, device=device, dtype=dtype)
+    masked_msa_mask[:, :, -1] = 0.0
 
     batch = {
         "coords_n": coords_n,
@@ -173,6 +182,8 @@ def make_fake_alphafold_batch(B=2, L=20, T=3, device="cpu", dtype=torch.float32)
         "coords_c": coords_c,
         "valid_res_mask": valid_res_mask,
         "valid_backbone_mask": valid_backbone_mask,
+        "masked_msa_true": masked_msa_true,
+        "masked_msa_mask": masked_msa_mask,
         "torsion_true": torsion_true,
         "torsion_mask": torsion_mask,
         "seq_tokens": torch.zeros(B, L, dtype=torch.long, device=device),
@@ -181,12 +192,19 @@ def make_fake_alphafold_batch(B=2, L=20, T=3, device="cpu", dtype=torch.float32)
 
 def make_fake_alphafold_out(batch, num_dist_bins=64, num_plddt_bins=50, device="cpu", dtype=torch.float32):
     B, L, _ = batch["coords_ca"].shape
-    T = batch["torsion_true"].shape[2]
 
     out = {
         "R": torch.eye(3, device=device, dtype=dtype).view(1, 1, 3, 3).repeat(B, L, 1, 1),
         "t": batch["coords_ca"].clone(),
         "distogram_logits": torch.randn(B, L, L, num_dist_bins, device=device, dtype=dtype),
+        "masked_msa_logits": torch.randn(
+            B,
+            batch["masked_msa_true"].shape[1],
+            L,
+            23,
+            device=device,
+            dtype=dtype,
+        ),
         "plddt_logits": torch.randn(B, L, num_plddt_bins, device=device, dtype=dtype),
         "torsions": batch["torsion_true"].clone(),
     }
@@ -260,6 +278,7 @@ def test_alphafold_loss_weighted_sum_exact():
         w_fape=0.5,
         w_aux=0.5,
         w_dist=0.3,
+        w_msa=2.0,
         w_plddt=0.01,
         w_torsion=0.01,
     )
@@ -270,6 +289,7 @@ def test_alphafold_loss_weighted_sum_exact():
         0.5 * losses["fape_loss"] +
         0.5 * losses["aux_loss"] +
         0.3 * losses["dist_loss"] +
+        2.0 * losses["msa_loss"] +
         0.01 * losses["plddt_loss"] +
         0.01 * losses["torsion_loss"]
     )
@@ -319,6 +339,7 @@ def test_alphafold_loss_uses_intermediate_aux_outputs():
         w_fape=0.0,
         w_aux=1.0,
         w_dist=0.0,
+        w_msa=0.0,
         w_plddt=0.0,
         w_torsion=0.0,
     )
@@ -383,6 +404,7 @@ def test_alphafold_loss_gradients_finite():
 
     out["t"] = out["t"].clone().detach().requires_grad_(True)
     out["distogram_logits"] = out["distogram_logits"].clone().detach().requires_grad_(True)
+    out["masked_msa_logits"] = out["masked_msa_logits"].clone().detach().requires_grad_(True)
     out["plddt_logits"] = out["plddt_logits"].clone().detach().requires_grad_(True)
     out["torsions"] = out["torsions"].clone().detach().requires_grad_(True)
 
@@ -395,11 +417,13 @@ def test_alphafold_loss_gradients_finite():
 
     assert out["t"].grad is not None, "No grad for predicted t"
     assert out["distogram_logits"].grad is not None, "No grad for distogram logits"
+    assert out["masked_msa_logits"].grad is not None, "No grad for masked MSA logits"
     assert out["plddt_logits"].grad is not None, "No grad for pLDDT logits"
     assert out["torsions"].grad is not None, "No grad for torsions"
 
     assert torch.isfinite(out["t"].grad).all(), "t grad has NaN/Inf"
     assert torch.isfinite(out["distogram_logits"].grad).all(), "distogram grad has NaN/Inf"
+    assert torch.isfinite(out["masked_msa_logits"].grad).all(), "masked MSA grad has NaN/Inf"
     assert torch.isfinite(out["plddt_logits"].grad).all(), "pLDDT grad has NaN/Inf"
     assert torch.isfinite(out["torsions"].grad).all(), "torsion grad has NaN/Inf"
 

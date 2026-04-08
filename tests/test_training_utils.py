@@ -240,6 +240,7 @@ def test_train_one_epoch_stochastic_recycling_samples_per_batch(toy_batch):
                 "loss": loss,
                 "fape_loss": zero,
                 "dist_loss": zero,
+                "msa_loss": zero,
                 "plddt_loss": zero,
                 "torsion_loss": zero,
             }
@@ -293,6 +294,7 @@ def test_train_alphafold2_forwards_recycling_flags(monkeypatch, tmp_path):
             "loss": 1.0,
             "fape_loss": 0.5,
             "dist_loss": 0.3,
+            "msa_loss": 0.2,
             "plddt_loss": 0.1,
             "torsion_loss": 0.1,
             "num_recycles": 1.5,

@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from difflib import SequenceMatcher
 from torch.utils.data import Dataset
 
@@ -72,11 +73,143 @@ FEATURE_AA_STATES = (
     "*",
 )
 FEATURE_AA_TO_INDEX = {token: index for index, token in enumerate(FEATURE_AA_STATES)}
+COMMON_AA_STATES = FEATURE_AA_STATES[:20]
+MASKED_MSA_MASK_TOKEN = "*"
+MASKED_MSA_INPUT_TOKEN = "."
+MASKED_MSA_NUM_CLASSES = len(FEATURE_AA_STATES)
 EXTRA_MSA_FEATURE_DIM = 25
 TEMPLATE_ANGLE_FEATURE_DIM = 51
 TEMPLATE_PAIR_FEATURE_DIM = 88
 TEMPLATE_PAIR_DIST_BINS = 64
 TEMPLATE_REL_POS_CLIP = 10
+
+
+def _build_token_to_masked_msa_class_lut() -> torch.Tensor:
+    lut = torch.full((max(AA_VOCAB.values()) + 1,), FEATURE_AA_TO_INDEX["X"], dtype=torch.long)
+    for token in COMMON_AA_STATES:
+        lut[AA_VOCAB[token]] = FEATURE_AA_TO_INDEX[token]
+    lut[AA_VOCAB["X"]] = FEATURE_AA_TO_INDEX["X"]
+    lut[AA_VOCAB["-"]] = FEATURE_AA_TO_INDEX["-"]
+    lut[AA_VOCAB[MASKED_MSA_INPUT_TOKEN]] = FEATURE_AA_TO_INDEX[MASKED_MSA_MASK_TOKEN]
+    return lut
+
+
+def _build_masked_msa_class_to_token_lut() -> torch.Tensor:
+    lut = torch.full((MASKED_MSA_NUM_CLASSES,), AA_VOCAB["X"], dtype=torch.long)
+    for token in COMMON_AA_STATES:
+        lut[FEATURE_AA_TO_INDEX[token]] = AA_VOCAB[token]
+    lut[FEATURE_AA_TO_INDEX["X"]] = AA_VOCAB["X"]
+    lut[FEATURE_AA_TO_INDEX["-"]] = AA_VOCAB["-"]
+    lut[FEATURE_AA_TO_INDEX[MASKED_MSA_MASK_TOKEN]] = AA_VOCAB[MASKED_MSA_INPUT_TOKEN]
+    return lut
+
+
+TOKEN_TO_MASKED_MSA_CLASS = _build_token_to_masked_msa_class_lut()
+MASKED_MSA_CLASS_TO_TOKEN = _build_masked_msa_class_to_token_lut()
+COMMON_AA_CLASS_INDICES = torch.tensor(
+    [FEATURE_AA_TO_INDEX[token] for token in COMMON_AA_STATES],
+    dtype=torch.long,
+)
+
+
+def build_masked_msa_inputs(
+    msa_tokens: torch.Tensor,
+    msa_mask: torch.Tensor | None,
+    *,
+    replace_fraction: float = 0.15,
+    profile_prob: float = 0.10,
+    same_prob: float = 0.10,
+    uniform_prob: float = 0.10,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Corrupt MSA inputs and emit AF2-style masked-MSA supervision targets."""
+
+    if msa_tokens.ndim != 2:
+        raise ValueError(f"msa_tokens must have shape [N, L], got {tuple(msa_tokens.shape)}")
+
+    replace_fraction = float(replace_fraction)
+    profile_prob = float(profile_prob)
+    same_prob = float(same_prob)
+    uniform_prob = float(uniform_prob)
+    total_replace_prob = profile_prob + same_prob + uniform_prob
+
+    if not 0.0 <= replace_fraction <= 1.0:
+        raise ValueError(f"replace_fraction must be in [0, 1], got {replace_fraction}")
+    if min(profile_prob, same_prob, uniform_prob) < 0.0:
+        raise ValueError("masked MSA corruption probabilities must be non-negative")
+    if total_replace_prob > 1.0 + 1e-8:
+        raise ValueError(
+            "masked MSA corruption probabilities must sum to <= 1.0: "
+            f"profile={profile_prob}, same={same_prob}, uniform={uniform_prob}"
+        )
+
+    device = msa_tokens.device
+    token_to_class = TOKEN_TO_MASKED_MSA_CLASS.to(device)
+    class_to_token = MASKED_MSA_CLASS_TO_TOKEN.to(device)
+    true_classes = token_to_class[msa_tokens.long()]
+
+    if msa_mask is None:
+        valid_positions = true_classes != FEATURE_AA_TO_INDEX["-"]
+    else:
+        # Restrict supervision to originally valid residues while keeping the
+        # existing trunk mask semantics unchanged for the corrupted input MSA.
+        valid_positions = msa_mask > 0
+
+    selected_positions = (
+        torch.rand(msa_tokens.shape, device=device, dtype=torch.float32) < replace_fraction
+    ) & valid_positions
+
+    corrupted_classes = true_classes.clone()
+    if selected_positions.any():
+        profile = F.one_hot(true_classes, num_classes=MASKED_MSA_NUM_CLASSES).to(torch.float32).mean(dim=0)
+        selection_indices = selected_positions.nonzero(as_tuple=False)
+        selection_columns = selection_indices[:, 1]
+        draws = torch.rand(selection_indices.shape[0], device=device, dtype=torch.float32)
+
+        same_cutoff = same_prob
+        uniform_cutoff = same_cutoff + uniform_prob
+        profile_cutoff = uniform_cutoff + profile_prob
+
+        uniform_pick = (draws >= same_cutoff) & (draws < uniform_cutoff)
+        profile_pick = (draws >= uniform_cutoff) & (draws < profile_cutoff)
+        mask_pick = draws >= profile_cutoff
+
+        common_classes = COMMON_AA_CLASS_INDICES.to(device)
+
+        if uniform_pick.any():
+            sampled_uniform = common_classes[
+                torch.randint(
+                    low=0,
+                    high=common_classes.shape[0],
+                    size=(int(uniform_pick.sum().item()),),
+                    device=device,
+                )
+            ]
+            corrupted_classes[
+                selection_indices[uniform_pick, 0],
+                selection_indices[uniform_pick, 1],
+            ] = sampled_uniform
+
+        if profile_pick.any():
+            sampled_profile = torch.multinomial(
+                profile[selection_columns[profile_pick]],
+                num_samples=1,
+            ).squeeze(-1)
+            corrupted_classes[
+                selection_indices[profile_pick, 0],
+                selection_indices[profile_pick, 1],
+            ] = sampled_profile
+
+        if mask_pick.any():
+            corrupted_classes[
+                selection_indices[mask_pick, 0],
+                selection_indices[mask_pick, 1],
+            ] = FEATURE_AA_TO_INDEX[MASKED_MSA_MASK_TOKEN]
+
+    return (
+        class_to_token[corrupted_classes].to(dtype=msa_tokens.dtype),
+        true_classes.to(dtype=torch.long),
+        selected_positions.to(dtype=torch.float32),
+    )
 
 
 def tokenize_sequence(seq: str) -> torch.Tensor:
@@ -851,6 +984,10 @@ class FoldbenchProteinDataset(Dataset):
         min_template_identity: float = 0.80,
         crop_size: int | None = None,
         random_crop: bool = True,
+        masked_msa_replace_fraction: float = 0.15,
+        masked_msa_profile_prob: float = 0.10,
+        masked_msa_same_prob: float = 0.10,
+        masked_msa_uniform_prob: float = 0.10,
         verbose: bool = True,
     ):
         self.json_path = Path(json_path).expanduser() if json_path is not None else None
@@ -866,6 +1003,10 @@ class FoldbenchProteinDataset(Dataset):
         self.single_sequence_mode = bool(single_sequence_mode)
         self.crop_size = None if crop_size is None else max(1, int(crop_size))
         self.random_crop = bool(random_crop)
+        self.masked_msa_replace_fraction = float(masked_msa_replace_fraction)
+        self.masked_msa_profile_prob = float(masked_msa_profile_prob)
+        self.masked_msa_same_prob = float(masked_msa_same_prob)
+        self.masked_msa_uniform_prob = float(masked_msa_uniform_prob)
 
         self.manifest_df = self._load_manifest()
         rows, dropped = self._build_index(self.manifest_df)
@@ -1052,6 +1193,14 @@ class FoldbenchProteinDataset(Dataset):
 
         cropped_target_sequence = full_target_sequence[crop_start:crop_end]
         cropped_msa_seqs = [sequence[crop_start:crop_end] for sequence in msa_seqs]
+        msa_tokens, masked_msa_true, masked_msa_mask = build_masked_msa_inputs(
+            msa_tokens,
+            msa_mask,
+            replace_fraction=self.masked_msa_replace_fraction,
+            profile_prob=self.masked_msa_profile_prob,
+            same_prob=self.masked_msa_same_prob,
+            uniform_prob=self.masked_msa_uniform_prob,
+        )
 
         torsion_true, torsion_mask = backbone_torsions_from_coords(
             coords_n=coords_n_np,
@@ -1102,6 +1251,8 @@ class FoldbenchProteinDataset(Dataset):
             "seq_tokens": seq_tokens,
             "msa_tokens": msa_tokens,
             "msa_mask": msa_mask,
+            "masked_msa_true": masked_msa_true,
+            "masked_msa_mask": masked_msa_mask,
             "extra_msa_feat": extra_msa_feat,
             "extra_msa_mask": extra_msa_mask,
             "template_angle_feat": template_angle_feat,

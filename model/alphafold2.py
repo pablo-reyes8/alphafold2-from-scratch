@@ -3,7 +3,7 @@
 This module wires the input embedder, Evoformer stack, structure module, and
 output heads into a single PyTorch model that returns representations,
 geometric predictions, backbone coordinates, torsions, confidence, and
-distogram outputs.
+distogram plus masked-MSA outputs.
 """
 
 import torch 
@@ -70,6 +70,7 @@ class AlphaFold2(nn.Module):
             },
             3: {
                 "distogram_head_enabled": False,
+                "masked_msa_head_enabled": False,
                 "plddt_head_enabled": False,
                 "torsion_head_enabled": False,
             },
@@ -102,6 +103,7 @@ class AlphaFold2(nn.Module):
         transition_expansion_structure = 4, 
         use_block_specific_params = False, 
         dist_bins=64,
+        masked_msa_num_classes=23,
         plddt_bins=50,
         n_torsions=7,
         num_res_blocks_torsion=2,
@@ -128,6 +130,7 @@ class AlphaFold2(nn.Module):
         template_num_blocks=2,
         structure_pair_context_enabled=True,
         distogram_head_enabled=True,
+        masked_msa_head_enabled=True,
         plddt_head_enabled=True,
         torsion_head_enabled=True):
 
@@ -159,6 +162,7 @@ class AlphaFold2(nn.Module):
             structure_pair_context_enabled,
         )
         distogram_head_enabled = ablation_defaults.get("distogram_head_enabled", distogram_head_enabled)
+        masked_msa_head_enabled = ablation_defaults.get("masked_msa_head_enabled", masked_msa_head_enabled)
         plddt_head_enabled = ablation_defaults.get("plddt_head_enabled", plddt_head_enabled)
         torsion_head_enabled = ablation_defaults.get("torsion_head_enabled", torsion_head_enabled)
 
@@ -179,6 +183,7 @@ class AlphaFold2(nn.Module):
         self.recycle_position_enabled = bool(recycle_position_enabled)
         self.structure_pair_context_enabled = bool(structure_pair_context_enabled)
         self.distogram_head_enabled = bool(distogram_head_enabled)
+        self.masked_msa_head_enabled = bool(masked_msa_head_enabled)
         self.plddt_head_enabled = bool(plddt_head_enabled)
         self.torsion_head_enabled = bool(torsion_head_enabled)
 
@@ -216,6 +221,7 @@ class AlphaFold2(nn.Module):
         # Cabezas finales para entender el modelo
         self.plddt_head = PlddtHead(c_s=c_s, num_bins=plddt_bins)
         self.distogram_head = DistogramHead(c_z=c_z, num_bins=dist_bins)
+        self.masked_msa_head = MaskedMsaHead(c_m=c_m, num_classes=masked_msa_num_classes)
         self.torsion_head = TorsionHead(c_s=c_s, n_torsions=n_torsions , num_res_blocks = num_res_blocks_torsion)
         self.recycling_embedder = RecyclingEmbedder(
             c_m=c_m,
@@ -244,6 +250,7 @@ class AlphaFold2(nn.Module):
         )
         zero_init_linear(self.plddt_head.mlp[-1])
         zero_init_linear(self.distogram_head.linear)
+        zero_init_linear(self.masked_msa_head.linear)
 
         self._freeze_module(self.evoformer, enabled=self.evoformer_enabled)
         self._freeze_module(self.extra_msa_stack, enabled=self.extra_msa_stack_enabled)
@@ -252,6 +259,7 @@ class AlphaFold2(nn.Module):
         self._freeze_module(self.recycling_embedder.pair_norm, enabled=self.recycle_pair_enabled)
         self._freeze_module(self.recycling_embedder.pos_embedding, enabled=self.recycle_position_enabled)
         self._freeze_module(self.distogram_head, enabled=self.distogram_head_enabled)
+        self._freeze_module(self.masked_msa_head, enabled=self.masked_msa_head_enabled)
         self._freeze_module(self.plddt_head, enabled=self.plddt_head_enabled)
         self._freeze_module(self.torsion_head, enabled=self.torsion_head_enabled)
 
@@ -409,6 +417,9 @@ class AlphaFold2(nn.Module):
 
             # z before structure for distogram
             distogram_logits = self.distogram_head(z) if self.distogram_head_enabled else None
+            masked_msa_logits = None
+            if self.masked_msa_head_enabled:
+                masked_msa_logits = self.masked_msa_head(m[:, :original_msa_depth])
 
             # single repr + structure
             s0 = self.single_proj(m)
@@ -472,6 +483,7 @@ class AlphaFold2(nn.Module):
                 "plddt_logits": plddt_logits,
                 "plddt": plddt,
                 "distogram_logits": distogram_logits,
+                "masked_msa_logits": masked_msa_logits,
             }
 
             if recycle_idx < num_recycles:

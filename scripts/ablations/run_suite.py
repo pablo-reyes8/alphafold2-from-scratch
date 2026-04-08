@@ -145,6 +145,7 @@ def _write_comparison_tables(rows: list[dict], output_dir: Path) -> None:
         "loss",
         "fape_loss",
         "dist_loss",
+        "msa_loss",
         "plddt_loss",
         "torsion_loss",
         "rmsd_logged",
@@ -162,11 +163,11 @@ def _write_comparison_tables(rows: list[dict], output_dir: Path) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    header = "| " + " | ".join(fieldnames[:13]) + " |"
-    separator = "| " + " | ".join(["---"] * 13) + " |"
+    header = "| " + " | ".join(fieldnames[:14]) + " |"
+    separator = "| " + " | ".join(["---"] * 14) + " |"
     lines = ["# Ablation Comparison", "", header, separator]
     for row in rows:
-        values = [str(row.get(field, "")) for field in fieldnames[:13]]
+        values = [str(row.get(field, "")) for field in fieldnames[:14]]
         lines.append("| " + " | ".join(values) + " |")
 
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -196,6 +197,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "loss": stats.get("loss"),
                 "fape_loss": stats.get("fape_loss"),
                 "dist_loss": stats.get("dist_loss"),
+                "msa_loss": stats.get("msa_loss"),
                 "plddt_loss": stats.get("plddt_loss"),
                 "torsion_loss": stats.get("torsion_loss"),
                 "rmsd_logged": stats.get("rmsd_logged"),

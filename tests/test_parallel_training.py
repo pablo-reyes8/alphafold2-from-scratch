@@ -36,6 +36,7 @@ def test_sync_epoch_stats_is_noop_without_distributed_context():
         "loss": 1.0,
         "fape_loss": 0.5,
         "dist_loss": 0.3,
+        "msa_loss": 0.2,
         "plddt_loss": 0.1,
         "torsion_loss": 0.1,
         "num_recycles": 2.0,
@@ -78,6 +79,7 @@ def test_model_parallel_wrapper_forward_cpu_smoke():
         )
 
     assert outputs["distogram_logits"].shape == (1, 8, 8, 64)
+    assert outputs["masked_msa_logits"].shape == (1, 2, 8, 23)
     assert outputs["torsions"].shape == (1, 8, 3, 2)
     assert outputs["backbone_coords"].shape == (1, 8, 4, 3)
     assert torch.isfinite(outputs["plddt"]).all()

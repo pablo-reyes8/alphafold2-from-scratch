@@ -27,6 +27,7 @@ def test_alphafold2_forward_smoke(toy_model, toy_batch):
     assert outputs["plddt_logits"].shape == (batch_size, length, 50)
     assert outputs["plddt"].shape == (batch_size, length)
     assert outputs["distogram_logits"].shape == (batch_size, length, length, 64)
+    assert outputs["masked_msa_logits"].shape == (batch_size, toy_batch["msa_tokens"].shape[1], length, 23)
 
     for value in outputs.values():
         if torch.is_tensor(value):
@@ -51,7 +52,7 @@ def test_alphafold_loss_orchestrator_returns_finite_components(toy_model, toy_ba
         )
         losses = toy_criterion(outputs, toy_batch)
 
-    for name in ("loss", "fape_loss", "aux_loss", "dist_loss", "plddt_loss", "torsion_loss"):
+    for name in ("loss", "fape_loss", "aux_loss", "dist_loss", "msa_loss", "plddt_loss", "torsion_loss"):
         assert name in losses
         assert torch.isfinite(losses[name])
         assert losses[name].ndim == 0
@@ -60,6 +61,7 @@ def test_alphafold_loss_orchestrator_returns_finite_components(toy_model, toy_ba
         toy_criterion.w_fape * losses["fape_loss"]
         + toy_criterion.w_aux * losses["aux_loss"]
         + toy_criterion.w_dist * losses["dist_loss"]
+        + toy_criterion.w_msa * losses["msa_loss"]
         + toy_criterion.w_plddt * losses["plddt_loss"]
         + toy_criterion.w_torsion * losses["torsion_loss"]
     )

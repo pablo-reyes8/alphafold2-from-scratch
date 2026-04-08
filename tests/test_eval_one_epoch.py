@@ -32,6 +32,8 @@ def make_fake_eval_batch(batch_size=1, msa_depth=2, seq_len=6):
         "msa_tokens": msa_tokens,
         "seq_mask": seq_mask,
         "msa_mask": msa_mask,
+        "masked_msa_true": torch.zeros(batch_size, msa_depth, seq_len, dtype=torch.long),
+        "masked_msa_mask": torch.zeros(batch_size, msa_depth, seq_len, dtype=torch.float32),
         "coords_n": coords_n,
         "coords_ca": coords_ca,
         "coords_c": coords_c,
@@ -79,6 +81,7 @@ class PerfectBackboneCriterion:
             "loss": loss,
             "fape_loss": zero,
             "dist_loss": zero,
+            "msa_loss": zero,
             "plddt_loss": zero,
             "torsion_loss": zero,
         }

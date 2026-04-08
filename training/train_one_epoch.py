@@ -119,6 +119,7 @@ def train_one_epoch(
         "loss": 0.0,
         "fape_loss": 0.0,
         "dist_loss": 0.0,
+        "msa_loss": 0.0,
         "plddt_loss": 0.0,
         "torsion_loss": 0.0,
         "num_recycles": 0.0,
@@ -134,8 +135,8 @@ def train_one_epoch(
     if log_every and is_main_process:
         print("┆ In-epoch statistics (AlphaFold2-like)")
         print(
-            "┆   {:>8} | {:>8} | {:>9} | {:>9} | {:>9} | {:>8} | {:>8} | {:>8}{}".format(
-                "step", "batch", "loss", "fape", "dist", "rmsd", "tm", "gdt",
+            "┆   {:>8} | {:>8} | {:>9} | {:>9} | {:>9} | {:>9} | {:>8} | {:>8} | {:>8}{}".format(
+                "step", "batch", "loss", "fape", "dist", "msa", "rmsd", "tm", "gdt",
                 (" | grad_norm | mem(MB)" if (log_grad_norm or log_mem) else "")
             )
         )
@@ -239,6 +240,7 @@ def train_one_epoch(
             running["loss"] += loss_val
             running["fape_loss"] += float(loss_dict["fape_loss"].detach().item())
             running["dist_loss"] += float(loss_dict["dist_loss"].detach().item())
+            running["msa_loss"] += float(loss_dict["msa_loss"].detach().item())
             running["plddt_loss"] += float(loss_dict["plddt_loss"].detach().item())
             running["torsion_loss"] += float(loss_dict["torsion_loss"].detach().item())
             running["num_recycles"] += float(batch_num_recycles)
@@ -289,12 +291,13 @@ def train_one_epoch(
 
                 if is_main_process:
                     print(
-                        "┆   {:8d} | {:8d} | {:9.4f} | {:9.4f} | {:9.4f} | {:8.3f} | {:8.3f} | {:8.3f} | {:>9} | {:>9} | {:7.1f}ms".format(
+                        "┆   {:8d} | {:8d} | {:9.4f} | {:9.4f} | {:9.4f} | {:9.4f} | {:8.3f} | {:8.3f} | {:8.3f} | {:>9} | {:>9} | {:7.1f}ms".format(
                             global_step,
                             i + 1,
                             loss_val,
                             float(loss_dict["fape_loss"].detach().item()),
                             float(loss_dict["dist_loss"].detach().item()),
+                            float(loss_dict["msa_loss"].detach().item()),
                             float(metrics["rmsd"].item()),
                             float(metrics["tm_score"].item()),
                             float(metrics["gdt_ts"].item()),
@@ -325,6 +328,7 @@ def train_one_epoch(
         "loss": running["loss"] / denom_loss,
         "fape_loss": running["fape_loss"] / denom_loss,
         "dist_loss": running["dist_loss"] / denom_loss,
+        "msa_loss": running["msa_loss"] / denom_loss,
         "plddt_loss": running["plddt_loss"] / denom_loss,
         "torsion_loss": running["torsion_loss"] / denom_loss,
         "num_recycles": running["num_recycles"] / denom_loss,
