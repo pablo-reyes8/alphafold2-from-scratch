@@ -532,7 +532,6 @@ A realistic roadmap for this repository could include:
 - [ ] tighter end-to-end training validation
 - [ ] expanded benchmark and evaluation scripts
 - [ ] example inference notebook or script
-- [ ] reproducibility report for a reference training run
 - [ ] Visualizations for understanding AlphaFold
 
 ---
