@@ -584,6 +584,6 @@ Special credit belongs to the original AlphaFold work and to the open-source com
 ## License
 
 This project is licensed under the **MIT License**.  
-See the [LICENSE](LICENSE) file for the full legal text.
+See the [LICENSE](LICENSE) file for the full legal license.
 
 Copyright (c) 2026 Pablo Reyes.
