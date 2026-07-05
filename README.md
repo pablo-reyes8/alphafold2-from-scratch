@@ -577,7 +577,7 @@ Please also cite the foundational papers:
 
 This repository is inspired by the AlphaFold2 line of work and the broader ecosystem of open implementations and educational reverse-engineering efforts around protein structure prediction.
 
-Special credit belongs to the original AlphaFold work and to the open-source community that has made this field far more accessible to study.
+Special credit belongs to the original AlphaFold - DeepMind work and to the open-source community that has made this field far more accessible to study.
 
 ---
 
